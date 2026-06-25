@@ -5,6 +5,7 @@
  * 校验从宽：title 和 keyPoints 是硬要求，actionItems 可选。
  */
 import { z } from 'zod';
+import { stripMarkdownFence } from '../../core/streamparse.js';
 
 export const SummarizeOutput = z.object({
   /** 总结标题（如"关于上线时间的讨论"）。 */
@@ -27,7 +28,7 @@ export type SummarizeOutput = z.infer<typeof SummarizeOutput>;
 export function parseSummarizeOutput(raw: string): SummarizeOutput {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripMarkdownFence(raw));
   } catch {
     return { title: '讨论总结', keyPoints: [raw] };
   }

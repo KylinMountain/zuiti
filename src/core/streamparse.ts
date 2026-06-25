@@ -7,6 +7,19 @@
  */
 
 /**
+ * 去掉模型输出可能的 markdown 围栏（```json ... ```），返回内部 JSON。
+ *
+ * MiMo 偶尔无视"不要 markdown 围栏"的指令，把 JSON 包在 ```json ... ``` 里。
+ * parser 在 JSON.parse 前先 strip，避免 fallback 把原文（含围栏）当 reply。
+ * 只在整段被围栏包裹时 strip，避免误伤 reply 内容本身的代码块。
+ */
+export function stripMarkdownFence(raw: string): string {
+  const trimmed = raw.trim();
+  const m = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/);
+  return m && m[1] ? m[1] : raw;
+}
+
+/**
  * 增量抽取流式 JSON 中的 `reply` 字符串值。
  *
  * 用法：每收到一个 chunk 调用 `push(chunk)`，拿到目前为止已流出的 reply 全文。

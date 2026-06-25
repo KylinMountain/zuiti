@@ -5,6 +5,7 @@
  * 校验从宽：title 和 content 是硬要求，bullets 可选。
  */
 import { z } from 'zod';
+import { stripMarkdownFence } from '../../core/streamparse.js';
 
 export const ExplainOutput = z.object({
   /** 讲解标题（如"这个词的意思是…"）。 */
@@ -27,7 +28,7 @@ export type ExplainOutput = z.infer<typeof ExplainOutput>;
 export function parseExplainOutput(raw: string): ExplainOutput {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripMarkdownFence(raw));
   } catch {
     return { title: '看屏讲解', content: raw };
   }

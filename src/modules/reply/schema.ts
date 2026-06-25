@@ -6,6 +6,7 @@
  * - 校验从宽：只有 `reply` 是硬要求，其余字段给默认值/容错。
  */
 import { z } from 'zod';
+import { stripMarkdownFence } from '../../core/streamparse.js';
 
 /** 一条可直接发出去的备选回复 + 简短风格标签。 */
 export const Candidate = z.object({
@@ -44,7 +45,7 @@ export type CoachOutput = z.infer<typeof CoachOutput>;
 export function parseCoachOutput(raw: string): CoachOutput {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripMarkdownFence(raw));
   } catch {
     return fallback(raw);
   }

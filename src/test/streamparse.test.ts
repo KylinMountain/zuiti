@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ReplyExtractor } from '../core/streamparse.js';
+import { ReplyExtractor, stripMarkdownFence } from '../core/streamparse.js';
 
 test('ReplyExtractor: 整段一次喂入，抽出 reply', () => {
   const ex = new ReplyExtractor();
@@ -37,4 +37,30 @@ test('ReplyExtractor: 还没到 reply 键时返回空', () => {
   assert.equal(ex.push('{"oth'), '');
   assert.equal(ex.replyText, '');
   assert.equal(ex.replyDone, false);
+});
+
+test('stripMarkdownFence: ```json 围栏 → 内部 JSON', () => {
+  const raw = '```json\n{"reply":"hi","candidates":[]}\n```';
+  assert.equal(stripMarkdownFence(raw), '{"reply":"hi","candidates":[]}');
+});
+
+test('stripMarkdownFence: ``` 围栏（无 json 标签）→ 内部 JSON', () => {
+  const raw = '```\n{"reply":"hi"}\n```';
+  assert.equal(stripMarkdownFence(raw), '{"reply":"hi"}');
+});
+
+test('stripMarkdownFence: 无围栏 → 原样返回', () => {
+  const raw = '{"reply":"hi","candidates":[]}';
+  assert.equal(stripMarkdownFence(raw), raw);
+});
+
+test('stripMarkdownFence: 围栏前后有空格/换行 → 仍能 strip', () => {
+  const raw = '  \n```json\n{"reply":"hi"}\n```\n  ';
+  assert.equal(stripMarkdownFence(raw), '{"reply":"hi"}');
+});
+
+test('stripMarkdownFence: reply 内容含代码块（非整段围栏）→ 不误伤', () => {
+  // reply 内容里有 ``` 但整段不是围栏包裹，不应 strip
+  const raw = '{"reply":"看这段代码 ```js console.log(1)``` 很简单"}';
+  assert.equal(stripMarkdownFence(raw), raw);
 });
