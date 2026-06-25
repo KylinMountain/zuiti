@@ -1,6 +1,6 @@
-// 嘴替 HUD 渲染逻辑 —— 监听 IPC、渲染卡片、点即复制。
+// 嘴替 HUD 渲染逻辑 —— 监听 IPC、渲染卡片、点即复制、TTS 播放。
 // 通过 window.zuiti（preload 暴露）与主进程通信。
-/* global window, document */
+/* global window, document, AudioContext */
 
 const api = window.zuiti;
 
@@ -11,6 +11,16 @@ const $result = document.getElementById('result');
 const $reply = document.getElementById('reply');
 const $candidates = document.getElementById('candidates');
 const $rationale = document.getElementById('rationale');
+const $screenshot = document.getElementById('screenshot');
+
+// TTS 流式播放：用 AudioContext 拼接 pcm16 块，首句先播
+let audioCtx = null;
+let ttsStartTime = 0;
+
+function ensureAudioCtx() {
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 24000 });
+  return audioCtx;
+}
 
 function runCoach() {
   const text = $text.value.trim();
@@ -18,7 +28,8 @@ function runCoach() {
   $go.disabled = true;
   $result.hidden = true;
   $status.hidden = false;
-  api.runCoach(text);
+  const withScreenshot = $screenshot && $screenshot.checked;
+  api.runCoach(text, withScreenshot);
 }
 
 $go.addEventListener('click', runCoach);
@@ -66,12 +77,32 @@ api.onError((msg) => {
   $result.hidden = false;
 });
 
+// TTS 流式播放：收到 base64 pcm16 块 → 解码 → 排队播放（首句先播）
+api.onTtsChunk((base64) => {
+  if (!ttsStartTime) ttsStartTime = audioCtx ? audioCtx.currentTime : 0;
+  const ctx = ensureAudioCtx();
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const pcm = new Int16Array(bytes.buffer);
+  const float = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 32768;
+  const buf = ctx.createBuffer(1, float.length, 24000);
+  buf.getChannelData(0).set(float);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+  src.start(ttsStartTime);
+  ttsStartTime += buf.duration;
+});
+
+api.onTtsDone(() => {
+  ttsStartTime = 0;
+});
+
 function bindCopy(btn, text) {
   btn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      // clipboard 在非聚焦时可能失败，回退 textarea
       const ta = document.createElement('textarea');
       ta.value = text;
       document.body.appendChild(ta);
@@ -89,5 +120,4 @@ function bindCopy(btn, text) {
   });
 }
 
-// 唤起时自动聚焦输入框
 $text.focus();

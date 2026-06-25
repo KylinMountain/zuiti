@@ -55,12 +55,27 @@ export { INSTRUCTIONS };
 /**
  * 构造给嘴替的用户输入。
  *
+ * - 无截图：返回纯文本字符串（CLI 文本模式）。
+ * - 有截图：返回多模态 messages 数组（text + input_image），让模型看屏判断场景。
+ *
  * @param text 用户语音说的真心话（中文/口语/带情绪均可）。
- * @param _screenshot 当前屏幕截图（由 harness 附带；CLI 文本模式不用）。
- * @returns 直接作为 run() 的 input。
+ * @param screenshotDataUrl 当前屏幕截图的 PNG data URL（由 harness 截屏后转）。
+ * @returns 直接作为 run() 的 input（string 或多模态 messages）。
  */
-export function buildUserInput(text: string, _screenshot?: Uint8Array): string {
-  return text;
+export function buildUserInput(
+  text: string,
+  screenshotDataUrl?: string,
+): string | { role: 'user'; content: ({ type: 'input_text'; text: string } | { type: 'input_image'; image: string })[] }[] {
+  if (!screenshotDataUrl) return text;
+  return [
+    {
+      role: 'user',
+      content: [
+        { type: 'input_text' as const, text },
+        { type: 'input_image' as const, image: screenshotDataUrl },
+      ],
+    },
+  ];
 }
 
 /** 重新导出 parseCoachOutput，统一从本模块入口拿解析器。 */

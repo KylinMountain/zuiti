@@ -15,8 +15,8 @@ TRAE AI 创造力大赛参赛作品，主赛道：生活娱乐。
 2. **LLM 不用 SDK 的 `outputType`**（MiMo 不支持严格 json_schema）；JSON 经 `modelSettings.providerData` 的 `json_object` 产出，由上层 zod 校验。不要改这套机制。
 3. **对线红线**：只做机智、有理有据的回怼——严禁人身攻击、脏话、歧视、教唆网暴；不确定一律走得体稳妥。
 4. **基调**：有趣、有梗、接地气、有网感，但一切服务于"能真的发出去"，不为搞笑牺牲得体。
-5. **加法式改造**：保留现有符号名（`CoachOutput` / `EnglishCoach` / `parseCoachOutput` / 目录 `src/modules/english/`），改名留到 Plan 2。
-6. **不修改渲染层 (`src/renderer/*`) 与 harness**，确保 `npm test` / `npm run typecheck` 始终绿色。
+5. **分层依赖只向前**：core↛modules↛main↛renderer；renderer 只经 `window.zuiti` 访问 Node。机械强制见 [src/test/architecture.test.ts](./src/test/architecture.test.ts)。
+6. **`npm test` / `npm run typecheck` 始终绿色**。改代码前先读 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
 ## 知识库地图（system of record）
 

@@ -53,7 +53,17 @@ test('CoachOutput schema: reply 是第一个键（不变量文档化）', () => 
   assert.equal(keys[0], 'reply');
 });
 
-test('buildUserInput: 原样返回文本（截图当前不参与文本模式）', () => {
+test('buildUserInput: 无截图原样返回文本', () => {
   assert.equal(buildUserInput('帮我接住情绪'), '帮我接住情绪');
   assert.equal(buildUserInput('  空格保留  '), '  空格保留  ');
+});
+
+test('buildUserInput: 有截图返回多模态 messages（text + input_image）', () => {
+  const result = buildUserInput('帮我接住情绪', 'data:image/png;base64,AAA');
+  assert.ok(Array.isArray(result));
+  const msg = (result as { role: string; content: { type: string; text?: string; image?: string }[] }[])[0]!;
+  assert.equal(msg.role, 'user');
+  assert.equal(msg.content[0]?.type, 'input_text');
+  assert.equal(msg.content[1]?.type, 'input_image');
+  assert.equal(msg.content[1]?.image, 'data:image/png;base64,AAA');
 });
