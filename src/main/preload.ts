@@ -4,7 +4,7 @@
  * 渲染层只能通过 window.zuiti 调用，无法直接访问 Node / Electron。
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import { CHANNELS, type CoachOutputDTO, type Capabilities } from '../shared/ipc.js';
+import { CHANNELS, type Capabilities, type SkillOutput } from '../shared/ipc.js';
 
 const api = {
   /** 查询能力（asr/tts/wake 是否可用 + wake 运行时含模型 base64）。渲染层启动时调用一次。 */
@@ -29,9 +29,9 @@ const api = {
   onActivate: (cb: () => void): void => {
     ipcRenderer.on(CHANNELS.onActivate, () => cb());
   },
-  /** 监听结果。 */
-  onResult: (cb: (dto: CoachOutputDTO) => void): void => {
-    ipcRenderer.on(CHANNELS.coachResult, (_e, dto: CoachOutputDTO) => cb(dto));
+  /** 监听结果（Plan 6: SkillOutput 联合类型，按 skillId 分支渲染）。 */
+  onResult: (cb: (dto: SkillOutput) => void): void => {
+    ipcRenderer.on(CHANNELS.coachResult, (_e, dto: SkillOutput) => cb(dto));
   },
   /** 监听加载中。 */
   onLoading: (cb: () => void): void => {

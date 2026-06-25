@@ -145,6 +145,56 @@ html, body {
 }
 .hud__rationale::before { content: "判断 · "; }
 
+/* Plan 6: explain/summarize 阅读视图 */
+.hud__reading {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 16px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.card--reading {
+  border-color: var(--pink);
+  background: #fff;
+  padding: 14px 16px;
+}
+.card__chip--reading { background: var(--pink-soft); }
+.card__reading-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 8px 0 6px;
+  line-height: 1.4;
+}
+.card__reading-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 10px;
+}
+.card__reading-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.card__reading-bullets li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  padding: 4px 0 4px 18px;
+  position: relative;
+}
+.card__reading-bullets li::before {
+  content: "•";
+  color: var(--pink);
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  font-weight: 700;
+}
+
 /* 按住说话按钮 */
 .hud__row--voice { margin-top: 4px; justify-content: center; }
 .hud__mic {

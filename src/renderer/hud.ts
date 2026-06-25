@@ -7,7 +7,7 @@
 import { VadDetector, computeRms } from './vad.js';
 import { initWakeWord } from './wakeword.js';
 import { encodeWav } from './wav.js';
-import type { Capabilities, CoachOutputDTO } from '../shared/ipc.js';
+import type { Capabilities, SkillOutput } from '../shared/ipc.js';
 
 declare global {
   interface Window {
@@ -18,7 +18,7 @@ declare global {
       sendRecordedAudio(base64DataUrl: string): void;
       sendWakeAudio(base64DataUrl: string): void;
       onActivate(cb: () => void): void;
-      onResult(cb: (dto: CoachOutputDTO) => void): void;
+      onResult(cb: (dto: SkillOutput) => void): void;
       onLoading(cb: () => void): void;
       onReplyChunk(cb: (replySoFar: string) => void): void;
       onError(cb: (msg: string) => void): void;
@@ -46,6 +46,11 @@ const $rationale = document.getElementById('rationale') as HTMLElement;
 const $screenshot = document.getElementById('screenshot') as HTMLInputElement;
 const $vadAuto = document.getElementById('vadAuto') as HTMLInputElement;
 const $wakeListen = document.getElementById('wakeListen') as HTMLInputElement;
+// Plan 6: explain/summarize 阅读视图元素
+const $readingView = document.getElementById('readingView') as HTMLElement;
+const $readingTitle = document.getElementById('readingTitle') as HTMLElement;
+const $readingContent = document.getElementById('readingContent') as HTMLElement;
+const $readingBullets = document.getElementById('readingBullets') as HTMLElement;
 
 // TTS 流式播放：用 AudioContext 拼接 pcm16 块，首句先播
 let audioCtx: AudioContext | null = null;
@@ -61,6 +66,7 @@ function runCoach(): void {
   if (!text) return;
   $go.disabled = true;
   $result.hidden = true;
+  $readingView.hidden = true;
   $status.hidden = false;
   const withScreenshot = $screenshot && $screenshot.checked;
   api.runCoach(text, withScreenshot);
@@ -258,10 +264,11 @@ api.onLoading(() => {
   $result.hidden = true;
 });
 
-// 流式 reply 蹦字：边生成边显示，不等整段 JSON 收完
+// 流式 reply 蹦字：边生成边显示，不等整段 JSON 收完（只对 reply skill 触发）
 api.onReplyChunk((replySoFar) => {
   if ($result.hidden) {
     $status.hidden = true;
+    $readingView.hidden = true;
     $result.hidden = false;
     $reply.textContent = '';
     $candidates.innerHTML = '';
@@ -270,34 +277,62 @@ api.onReplyChunk((replySoFar) => {
   $reply.textContent = replySoFar;
 });
 
+// Plan 6: 按 skillId 分支渲染
 api.onResult((dto) => {
   $status.hidden = true;
   $voiceState.hidden = true;
   $go.disabled = false;
 
-  $reply.textContent = dto.reply;
-  $candidates.innerHTML = '';
-  for (const c of dto.candidates) {
-    const card = document.createElement('article');
-    card.className = 'card';
-    card.innerHTML =
-      '<div class="card__chip"></div>' +
-      '<p class="card__text"></p>' +
-      '<button class="card__copy">复制</button>';
-    (card.querySelector('.card__chip') as HTMLElement).textContent = c.style || '备选';
-    (card.querySelector('.card__text') as HTMLElement).textContent = c.text;
-    bindCopy(card.querySelector('.card__copy') as HTMLButtonElement, c.text);
-    $candidates.appendChild(card);
+  if (dto.skillId === 'reply') {
+    // reply 视图：卡片复制（现有）
+    $readingView.hidden = true;
+    $reply.textContent = dto.reply;
+    $candidates.innerHTML = '';
+    for (const c of dto.candidates) {
+      const card = document.createElement('article');
+      card.className = 'card';
+      card.innerHTML =
+        '<div class="card__chip"></div>' +
+        '<p class="card__text"></p>' +
+        '<button class="card__copy">复制</button>';
+      (card.querySelector('.card__chip') as HTMLElement).textContent = c.style || '备选';
+      (card.querySelector('.card__text') as HTMLElement).textContent = c.text;
+      bindCopy(card.querySelector('.card__copy') as HTMLButtonElement, c.text);
+      $candidates.appendChild(card);
+    }
+    $rationale.textContent = dto.rationale || '';
+    $rationale.hidden = !dto.rationale;
+    $result.hidden = false;
+  } else {
+    // explain/summarize 视图：阅读模式
+    $result.hidden = true;
+    $readingTitle.textContent = dto.title;
+    $readingBullets.innerHTML = '';
+    let bullets: string[];
+    if (dto.skillId === 'explain') {
+      $readingContent.textContent = dto.content;
+      bullets = dto.bullets ?? [];
+    } else {
+      // summarize: content 空，keyPoints + actionItems 进 bullets
+      $readingContent.textContent = '';
+      bullets = [...(dto.keyPoints ?? []), ...(dto.actionItems ?? []).map(a => '✓ ' + a)];
+    }
+    for (const b of bullets) {
+      const li = document.createElement('li');
+      li.textContent = b;
+      $readingBullets.appendChild(li);
+    }
+    $readingBullets.hidden = bullets.length === 0;
+    $readingContent.hidden = !$readingContent.textContent;
+    $readingView.hidden = false;
   }
-  $rationale.textContent = dto.rationale || '';
-  $rationale.hidden = !dto.rationale;
-  $result.hidden = false;
 });
 
 api.onError((msg) => {
   $status.hidden = true;
   $voiceState.hidden = true;
   $go.disabled = false;
+  $readingView.hidden = true;
   $reply.textContent = '出错了：' + msg;
   $candidates.innerHTML = '';
   $rationale.hidden = true;
