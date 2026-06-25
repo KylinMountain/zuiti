@@ -17,7 +17,8 @@
     "coach": "npm run build:node && node dist/cli/coach.js",
     "fetch-models": "node scripts/fetch-wake-models.mjs",
     "start": "npm run build && electron .",
-    "dev": "npm run build && electron . --enable-logging"
+    "dev": "npm run build && electron . --enable-logging",
+    "push": "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git push \"$@\""
   },
   "dependencies": {
     "@openai/agents": "^0.12.0",
