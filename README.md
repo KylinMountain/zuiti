@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./docs/images/hero.jpg" alt="嘴替 hero" width="100%" />
+<img src="./docs/images/hero.svg" alt="嘴替 hero" width="100%" />
 
 # 嘴替 · 你负责想，它负责嘴
 
@@ -37,7 +37,7 @@
 
 ## 三步救场
 
-<img src="./docs/images/flow.jpg" alt="三步救场流程" width="100%" />
+<img src="./docs/images/flow.svg" alt="三步救场流程" width="100%" />
 
 | STEP 01 | STEP 02 | STEP 03 |
 |---------|---------|---------|
@@ -138,7 +138,7 @@ CI：push / PR 到 main 时自动跑 typecheck + test（`.github/workflows/ci.ym
 
 ## 架构
 
-<img src="./docs/images/arch.jpg" alt="架构分层" width="100%" />
+<img src="./docs/images/arch.svg" alt="架构分层" width="100%" />
 
 分层依赖只向前：`Types → Config → Core → Modules → Main → Renderer`。
 

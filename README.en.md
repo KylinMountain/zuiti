@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./docs/images/hero.jpg" alt="Zuiti hero" width="100%" />
+<img src="./docs/images/hero.svg" alt="Zuiti hero" width="100%" />
 
 # Zuiti · You think it, it speaks it
 
@@ -37,7 +37,7 @@ Zuiti (嘴替, literally "mouth-double") turns that "stuck on the tip" into "nai
 
 ## Three-Step Rescue
 
-<img src="./docs/images/flow.jpg" alt="Three-step flow" width="100%" />
+<img src="./docs/images/flow.svg" alt="Three-step flow" width="100%" />
 
 | STEP 01 | STEP 02 | STEP 03 |
 |---------|---------|---------|
@@ -129,7 +129,7 @@ CI: typecheck + test on push/PR to main (`.github/workflows/ci.yml`).
 
 ## Architecture
 
-<img src="./docs/images/arch.jpg" alt="Architecture layers" width="100%" />
+<img src="./docs/images/arch.svg" alt="Architecture layers" width="100%" />
 
 Layered dependencies flow forward only: `Types → Config → Core → Modules → Main → Renderer`.
 
