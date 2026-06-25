@@ -7,7 +7,7 @@
  */
 import { run } from '@openai/agents';
 import { config as loadDotenv } from 'dotenv';
-import { EnglishCoach, buildUserInput, parseCoachOutput } from '../modules/english/coach.js';
+import { ReplyCoach, buildUserInput, parseCoachOutput } from '../modules/reply/coach.js';
 import { initProvider } from '../core/provider.js';
 import { renderCoachOutput } from './render.js';
 
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   }
 
   const startedAt = Date.now();
-  const result = await run(EnglishCoach, buildUserInput(text));
+  const result = await run(ReplyCoach, buildUserInput(text));
   const ms = Date.now() - startedAt;
 
   const raw = (result.finalOutput ?? '').toString();

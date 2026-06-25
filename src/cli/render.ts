@@ -1,5 +1,5 @@
 /** 把嘴替结果格式化为终端可读文本（纯函数，便于单测且不触发 CLI 主流程）。 */
-import type { CoachOutput } from '../modules/english/schema.js';
+import type { CoachOutput } from '../modules/reply/schema.js';
 
 export function renderCoachOutput(o: CoachOutput): string {
   const lines: string[] = ['\n=== 嘴替推荐 ===\n' + o.reply];

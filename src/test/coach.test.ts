@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCoachOutput, CoachOutput } from '../modules/english/schema.js';
+import { parseCoachOutput, CoachOutput } from '../modules/reply/schema.js';
 
 test('parseCoachOutput: 解析完整输出（reply + candidates + rationale）', () => {
   const out = parseCoachOutput(JSON.stringify({

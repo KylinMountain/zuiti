@@ -4,23 +4,8 @@
  * 不变量（见 ARCHITECTURE.md）：
  * - `reply` 必须是 JSON 第一个键（流式蹦字 + 首句 TTS 靠它）。schema 里也排第一，做文档化约束。
  * - 校验从宽：只有 `reply` 是硬要求，其余字段给默认值/容错。
- * - `diagnostics` / `variants` 为兼容渲染层保留，嘴替场景一般为空，Plan 2 移除。
  */
 import { z } from 'zod';
-
-/** 原表达问题诊断项（旧字段，保留兼容渲染层，Plan 2 移除）。 */
-export const Diagnostic = z.object({
-  severity: z.enum(['error', 'warning', 'info']).default('info'),
-  message: z.string(),
-  fix: z.string().optional(),
-});
-
-/** 旧的固定风格变体（保留兼容渲染层，Plan 2 移除）。 */
-export const StyleVariants = z.object({
-  formal: z.string().optional(),
-  casual: z.string().optional(),
-  concise: z.string().optional(),
-});
 
 /** 一条可直接发出去的备选回复 + 简短风格标签。 */
 export const Candidate = z.object({
@@ -41,16 +26,10 @@ export const CoachOutput = z.object({
   reply: z.string(),
   /** 2-3 条带风格标签的备选神回复，供用户挑。 */
   candidates: z.array(Candidate).default([]),
-  /** 原表达问题诊断（嘴替场景一般为空；保留以兼容渲染层，Plan 2 移除）。 */
-  diagnostics: z.array(Diagnostic).default([]),
   /** 一句话说明判断的场景与语气策略。 */
   rationale: z.string().default(''),
-  /** 旧的固定风格变体（保留以兼容渲染层，Plan 2 移除）。 */
-  variants: StyleVariants.nullish().default(null),
 });
 
-export type Diagnostic = z.infer<typeof Diagnostic>;
-export type StyleVariants = z.infer<typeof StyleVariants>;
 export type Candidate = z.infer<typeof Candidate>;
 export type CoachOutput = z.infer<typeof CoachOutput>;
 
@@ -77,12 +56,12 @@ export function parseCoachOutput(raw: string): CoachOutput {
   if (parsed && typeof parsed === 'object' && 'reply' in parsed) {
     const reply = (parsed as { reply?: unknown }).reply;
     if (typeof reply === 'string') {
-      return { reply, candidates: [], diagnostics: [], rationale: '', variants: null };
+      return { reply, candidates: [], rationale: '' };
     }
   }
   return fallback(raw);
 }
 
 function fallback(reply: string): CoachOutput {
-  return { reply, candidates: [], diagnostics: [], rationale: '', variants: null };
+  return { reply, candidates: [], rationale: '' };
 }

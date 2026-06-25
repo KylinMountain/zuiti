@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { INSTRUCTIONS } from '../modules/english/coach.js';
+import { INSTRUCTIONS } from '../modules/reply/coach.js';
 import { loadDotenv } from '../cli/coach.js';
-import { CoachOutput } from '../modules/english/schema.js';
+import { CoachOutput } from '../modules/reply/schema.js';
 
 test('invariant: prompt 要求 reply 排第一键', () => {
   assert.match(INSTRUCTIONS, /reply.*必须排第一|排第一.*reply|必须排第一/);
