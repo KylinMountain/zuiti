@@ -192,6 +192,19 @@ api.onLoading(() => {
   $result.hidden = true;
 });
 
+// 流式 reply 蹦字：边生成边显示，不等整段 JSON 收完
+api.onReplyChunk((replySoFar) => {
+  // 第一次收到 chunk 时，先显示卡片框架（loading 状态）
+  if ($result.hidden) {
+    $status.hidden = true;
+    $result.hidden = false;
+    $reply.textContent = '';
+    $candidates.innerHTML = '';
+    $rationale.hidden = true;
+  }
+  $reply.textContent = replySoFar;
+});
+
 api.onResult((dto) => {
   $status.hidden = true;
   $voiceState.hidden = true;

@@ -14,9 +14,22 @@ import { run } from '@openai/agents';
 import { ReplyCoach, buildUserInput, parseCoachOutput } from '../modules/reply/coach.js';
 import { initProvider } from '../core/provider.js';
 import { log } from '../core/log.js';
+import { ReplyExtractor } from '../core/streamparse.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import type { CoachOutputDTO } from '../shared/ipc.js';
+
+/** 从一个 SDK raw stream event 提取文本 delta（兼容 responses API 与 chat_completions API）。 */
+function extractDelta(data: unknown): string {
+  if (!data || typeof data !== 'object') return '';
+  const d = data as Record<string, unknown>;
+  // responses API: { type: 'response.output_text.delta', delta: string }
+  if (typeof d.delta === 'string') return d.delta;
+  // chat_completions: { choices: [{ delta: { content: string } }] }
+  const choices = d.choices as { delta?: { content?: string } }[] | undefined;
+  const c = choices?.[0]?.delta?.content;
+  return typeof c === 'string' ? c : '';
+}
 
 /** 注册 coach + voice IPC handlers。主进程启动时调用一次。 */
 export function registerCoachIpc(mainWindow: BrowserWindow): void {
@@ -28,7 +41,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow): void {
     }
   };
 
-  /** coach 核心流水线：text → 截屏（可选）→ ReplyCoach → coach:result → TTS 流式。 */
+  /** coach 核心流水线：text → 截屏（可选）→ ReplyCoach 流式 → coach:result → TTS 流式。 */
   async function runCoachPipeline(text: string, withScreenshot: boolean): Promise<void> {
     mainWindow.webContents.send('coach:loading');
     log.info('coach.run.start', { textLen: text.length, withScreenshot });
@@ -45,8 +58,24 @@ export function registerCoachIpc(mainWindow: BrowserWindow): void {
         }
       }
 
-      const result = await run(ReplyCoach, buildUserInput(text, screenshotDataUrl));
-      const raw = (result.finalOutput ?? '').toString();
+      // 流式 run：边生成边推 reply 增量给渲染层蹦字（兑现不变量 1）
+      const stream = await run(ReplyCoach, buildUserInput(text, screenshotDataUrl), { stream: true });
+      const extractor = new ReplyExtractor();
+      let lastPushedLen = 0;
+      for await (const ev of stream) {
+        if (ev.type !== 'raw_model_stream_event') continue;
+        const chunk = extractDelta(ev.data);
+        if (!chunk) continue;
+        const reply = extractor.push(chunk);
+        // 只推增量，省 IPC 流量
+        if (reply.length > lastPushedLen) {
+          mainWindow.webContents.send('coach:replyChunk', reply);
+          lastPushedLen = reply.length;
+        }
+      }
+      log.info('coach.stream.done', { replyLen: extractor.replyText.length });
+
+      const raw = (stream.finalOutput ?? '').toString();
       const output = parseCoachOutput(raw);
       const dto: CoachOutputDTO = {
         reply: output.reply,

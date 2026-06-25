@@ -23,6 +23,10 @@ const api = {
   onLoading: (cb: () => void): void => {
     ipcRenderer.on('coach:loading', () => cb());
   },
+  /** 监听流式 reply 增量（迄今为止已流出的 reply 全文，每次新增都推）。 */
+  onReplyChunk: (cb: (replySoFar: string) => void): void => {
+    ipcRenderer.on('coach:replyChunk', (_e, replySoFar: string) => cb(replySoFar));
+  },
   /** 监听错误。 */
   onError: (cb: (msg: string) => void): void => {
     ipcRenderer.on('coach:error', (_e, msg: string) => cb(msg));
