@@ -27,6 +27,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Run summary 文件（Plan 7：每次 skill pipeline 跑完写，不入库）
+logs/
+
 # Test coverage
 coverage/
 .nyc_output/
