@@ -11,6 +11,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { CoachOutput } from '../modules/reply/schema.js';
 import { INSTRUCTIONS } from '../modules/reply/coach.js';
+import { listSkills, type Skill } from '../core/skill.js';
+import { registerAllSkills } from '../modules/index.js';
+import type { SkillId, SkillOutput } from '../shared/ipc.js';
+
+// Plan 6: 注册全部 skill，供 lint 测试验证
+registerAllSkills();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, '../../src');
@@ -95,4 +101,29 @@ test('lint: renderer/ 不得 import Node 侧模块（core/modules/main），可�
     // renderer 目录可能不存在（早期），跳过
   }
   if (!hasTs) assert.ok(true, 'renderer 无 .ts，跳过');
+});
+
+test('lint: Skill 接口含 agent + buildInput（Plan 6 一般化）', () => {
+  // Skill 接口扩展后必须含 agent + buildInput，支撑 router 自动调度
+  // 这里用结构断言：取一个已注册 skill 验证字段存在
+  const skills = listSkills();
+  assert.ok(skills.length >= 1, '至少注册一个 skill（reply）');
+  for (const s of skills) {
+    assert.equal(typeof s.id, 'string', `${s.id}: id 必须是 string`);
+    assert.equal(typeof s.name, 'string', `${s.id}: name 必须是 string`);
+    assert.equal(typeof s.instructions, 'string', `${s.id}: instructions 必须是 string`);
+    assert.equal(typeof s.parseOutput, 'function', `${s.id}: parseOutput 必须是函数`);
+    // Plan 6 新增字段
+    assert.ok(s.agent, `${s.id}: agent 必须存在（Plan 6 一般化）`);
+    assert.equal(typeof s.buildInput, 'function', `${s.id}: buildInput 必须是函数（Plan 6 一般化）`);
+  }
+});
+
+test('lint: SkillId 联合类型完整（reply/explain/summarize）', () => {
+  // 编译期类型检查 + 运行期 sanity：三个 skill id 都在
+  const expected: SkillId[] = ['reply', 'explain', 'summarize'];
+  const registered = listSkills().map(s => s.id as SkillId);
+  for (const id of expected) {
+    assert.ok(registered.includes(id), `skill "${id}" 必须注册`);
+  }
 });

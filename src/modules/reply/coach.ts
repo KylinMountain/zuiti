@@ -81,3 +81,18 @@ export function buildUserInput(
 /** 重新导出 parseCoachOutput，统一从本模块入口拿解析器。 */
 export { parseCoachOutput };
 export type { CoachOutput };
+
+/**
+ * reply skill 注册项（Plan 6 一般化：Skill 接口含 agent + buildInput）。
+ *
+ * 供 modules/index.ts 统一注册，router 按 id 调度。
+ */
+export const replySkill = {
+  id: 'reply',
+  name: '嘴替',
+  description: '替你把话说漂亮——恋爱/对线/职场/英文，跨场景跨语言',
+  instructions: INSTRUCTIONS,
+  agent: ReplyCoach,
+  buildInput: buildUserInput,
+  parseOutput: parseCoachOutput,
+} as const;

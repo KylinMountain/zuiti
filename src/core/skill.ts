@@ -6,8 +6,9 @@
  *
  * 扩展分两档：
  *  - 纯 skill/prompt 替换（输出形状相同，如 reply + candidates）；
- *  - 输出形状不同时，一般化 parseOutput + 加 UI 视图。
+ *  - 输出形状不同时，一般化 parseOutput + 加 UI 视图（Plan 6：explain/summarize）。
  */
+import type { Agent } from '@openai/agents';
 
 /** 一条 skill 的输入：用户口述 + 可选屏幕截图。 */
 export interface SkillInput {
@@ -17,16 +18,24 @@ export interface SkillInput {
   screenshot?: Uint8Array;
 }
 
-/** skill 注册项。 */
+/**
+ * skill 注册项（Plan 6 一般化：加 agent + buildInput，支撑 router 自动调度）。
+ *
+ * 每个 skill 自带 Agent + 输入构造 + 输出解析，router 按 id 调度。
+ */
 export interface Skill {
-  /** 唯一 id，如 'reply' / 'read-aloud'。 */
+  /** 唯一 id，如 'reply' / 'explain' / 'summarize'。 */
   id: string;
-  /** 展示名，如「嘴替」「读向」。 */
+  /** 展示名，如「嘴替」「看屏讲解」「总结讨论」。 */
   name: string;
   /** 一句话说明。 */
   description: string;
   /** 构造给 LLM 的系统指令。 */
   instructions: string;
+  /** 该 skill 的 Agent（router 按 id 取 skill 后用此 Agent 跑 run）。 */
+  agent: Agent;
+  /** 构造给 LLM 的输入（文本 + 可选截图 data URL）。 */
+  buildInput(text: string, screenshotDataUrl?: string): unknown;
   /** 把原始 LLM 输出解析为该 skill 的结构化结果。 */
   parseOutput(raw: string): unknown;
 }
