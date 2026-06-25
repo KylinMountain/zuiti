@@ -14,6 +14,7 @@
     "build": "npm run build:node && npm run build:renderer",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "test": "npm run build:node && node --test \"dist/test/*.test.js\"",
+    "test:e2e": "npm run build:node && E2E_SKIP=0 node --test \"dist/test/e2e/*.test.js\"",
     "coach": "npm run build:node && node dist/cli/coach.js",
     "fetch-models": "node scripts/fetch-wake-models.mjs",
     "start": "npm run build && electron .",

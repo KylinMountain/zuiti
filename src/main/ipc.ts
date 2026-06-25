@@ -1,47 +1,31 @@
 /**
- * 主进程 IPC —— 嘴替完整语音流程编排（Plan 6: skill 自动路由）。
+ * 主进程 IPC —— 嘴替完整语音流程编排（Plan 7: 用 skill-runner 纯函数）。
  *
  * 流程：
- * 1. renderer send('coach:run', text) → router 判断 skillId → 跑对应 skill Agent
- *    → coach:result（SkillOutput 联合类型）→ reply 走流式蹦字 + TTS
+ * 1. renderer send('coach:run', text) → runSkill（纯函数）→ coach:result（SkillOutput）
+ *    → reply 走流式蹦字 + TTS 首句先播
  * 2. renderer send('voice:recorded', base64DataUrl) → 解码 → ASR → voice:transcript
  *    → 自动跑 skill 流水线（同 1）
  *
  * 截屏看屏：coach:run 时可选附 screenshotDataUrl；或主进程自动截屏（Plan 3 Task 2）。
+ *
+ * Plan 7: 核心逻辑抽到 modules/skill-runner.ts（不依赖 BrowserWindow），本文件只负责
+ * IPC 编排（send/chunk/TTS）+ 截屏 + 错误回送。
  */
 import { ipcMain, type BrowserWindow } from 'electron';
-import { run } from '@openai/agents';
 import { initProvider } from '../core/provider.js';
 import { log } from '../core/log.js';
-import { ReplyExtractor } from '../core/streamparse.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import { containsWakeWord } from '../core/wakeword.js';
-import { getSkill } from '../core/skill.js';
-import { classifyIntentHeuristic, routeSkillWithLlm } from '../modules/router.js';
-import { registerAllSkills } from '../modules/index.js';
-import { CHANNELS, type Capabilities, type SkillOutput, type WakeRuntime } from '../shared/ipc.js';
-
-/** 从一个 SDK raw stream event 提取文本 delta（兼容 responses API 与 chat_completions API）。 */
-function extractDelta(data: unknown): string {
-  if (!data || typeof data !== 'object') return '';
-  const d = data as Record<string, unknown>;
-  // responses API: { type: 'response.output_text.delta', delta: string }
-  if (typeof d.delta === 'string') return d.delta;
-  // chat_completions: { choices: [{ delta: { content: string } }] }
-  const choices = d.choices as { delta?: { content?: string } }[] | undefined;
-  const c = choices?.[0]?.delta?.content;
-  return typeof c === 'string' ? c : '';
-}
+import { runSkill } from '../modules/skill-runner.js';
+import { CHANNELS, type Capabilities, type WakeRuntime } from '../shared/ipc.js';
 
 /**
  * 注册 coach + voice + capabilities IPC handlers。主进程启动时调用一次。
  * @param wake 唤醒词运行时（null 时功能关闭，渲染层不启动 openWakeWord）。
  */
 export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): void {
-  // Plan 6: 注册全部 skill（reply/explain/summarize）
-  registerAllSkills();
-
   let inited = false;
   const ensureInit = (): void => {
     if (!inited) {
@@ -58,8 +42,8 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
   }));
 
   /**
-   * skill 核心流水线（Plan 6）：
-   * text → 截屏（可选）→ router 判断 skillId → 跑对应 skill → coach:result (SkillOutput)。
+   * skill 核心流水线（Plan 7: 委托给 runSkill 纯函数）：
+   * text → 截屏（可选）→ runSkill → coach:result (SkillOutput)。
    *
    * - reply：流式蹦字 + TTS 首句先播
    * - explain/summarize：非流式一次性显示，不走 TTS
@@ -79,72 +63,16 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
       }
     }
 
-    // LLM 精确路由（3s 超时回退 heuristic）
-    const skillId = await routeSkillWithLlm(text, screenshotDataUrl);
-    const skill = getSkill(skillId);
-    if (!skill) {
-      mainWindow.webContents.send(CHANNELS.coachError, `skill "${skillId}" 未注册`);
-      return;
-    }
-    log.info('skill.route', { skillId, textLen: text.length, withScreenshot, heuristic: classifyIntentHeuristic(text) });
-
     try {
-      if (skillId === 'reply') {
-        await runReplySkill(skill, text, screenshotDataUrl);
-      } else {
-        await runReadingSkill(skill, skillId, text, screenshotDataUrl);
-      }
+      const { output } = await runSkill(text, screenshotDataUrl, {
+        onReplyChunk: (reply) => mainWindow.webContents.send(CHANNELS.coachReplyChunk, reply),
+        onTtsStart: (firstSentence) => startTtsStream(firstSentence, mainWindow),
+      });
+      mainWindow.webContents.send(CHANNELS.coachResult, output);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       mainWindow.webContents.send(CHANNELS.coachError, msg);
-      log.error('skill.run.error', { skillId, msg });
-    }
-  }
-
-  /** reply skill：流式蹦字 + TTS 首句先播（不变量 1：reply 第一键）。 */
-  async function runReplySkill(skill: ReturnType<typeof getSkill>, text: string, screenshotDataUrl: string | undefined): Promise<void> {
-    if (!skill) return;
-    const stream = await run(skill.agent, skill.buildInput(text, screenshotDataUrl) as never, { stream: true });
-    const extractor = new ReplyExtractor();
-    let lastPushedLen = 0;
-    let ttsStarted = false;
-    let firstSentence = '';
-
-    // 首句边界检测：句号/感叹号/问号/换行/分号都算一句结束
-    const firstSentenceEnd = /[。！？!?;\n]/;
-
-    for await (const ev of stream) {
-      if (ev.type !== 'raw_model_stream_event') continue;
-      const chunk = extractDelta(ev.data);
-      if (!chunk) continue;
-      const reply = extractor.push(chunk);
-      if (reply.length > lastPushedLen) {
-        mainWindow.webContents.send(CHANNELS.coachReplyChunk, reply);
-        lastPushedLen = reply.length;
-      }
-      // TTS 首句先播：检测到首句边界就启动 TTS（不等全部收完）
-      if (!ttsStarted && firstSentenceEnd.test(reply)) {
-        const match = reply.match(firstSentenceEnd);
-        if (match && match.index !== undefined) {
-          firstSentence = reply.slice(0, match.index + 1);
-          if (firstSentence.length >= 2) {  // 至少 2 字符才播，避免单个标点
-            ttsStarted = true;
-            startTtsStream(firstSentence, mainWindow);
-          }
-        }
-      }
-    }
-    log.info('coach.stream.done', { replyLen: extractor.replyText.length, ttsFirstSentence: ttsStarted });
-
-    const raw = (stream.finalOutput ?? '').toString();
-    const output = skill.parseOutput(raw) as { reply: string; candidates: { text: string; style: string }[]; rationale: string };
-    const dto: SkillOutput = { skillId: 'reply', ...output };
-    mainWindow.webContents.send(CHANNELS.coachResult, dto);
-    log.info('skill.reply.done', { replyLen: output.reply.length, candidates: output.candidates.length });
-
-    // 若流式期间未触发 TTS（回复太短无标点），用完整 reply 兜底
-    if (!ttsStarted) {
-      startTtsStream(output.reply, mainWindow);
+      log.error('skill.run.error', { msg });
     }
   }
 
@@ -161,22 +89,6 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         win.webContents.send(CHANNELS.voiceTtsDone);
       }
     })();
-  }
-
-  /** explain/summarize skill：非流式一次性显示，不走 TTS。 */
-  async function runReadingSkill(
-    skill: ReturnType<typeof getSkill>,
-    skillId: 'explain' | 'summarize',
-    text: string,
-    screenshotDataUrl: string | undefined,
-  ): Promise<void> {
-    if (!skill) return;
-    const result = await run(skill.agent, skill.buildInput(text, screenshotDataUrl) as never);
-    const raw = (result.finalOutput ?? '').toString();
-    const output = skill.parseOutput(raw);
-    const dto = { skillId, ...(output as object) } as SkillOutput;
-    mainWindow.webContents.send(CHANNELS.coachResult, dto);
-    log.info('skill.reading.done', { skillId, rawLen: raw.length });
   }
 
   // 注意：preload 用 ipcRenderer.send（fire-and-forget），主进程用 ipcMain.on。
