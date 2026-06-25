@@ -3,9 +3,9 @@
  *
  * 流程：
  * 1. renderer send('coach:run', text) → run(ReplyCoach, buildUserInput(text, screenshot?))
- *    → parseCoachOutput → coach:result（含 candidates）
- * 2. renderer send('voice:listen') → 主进程开麦录音 → ASR → voice:transcript
- * 3. coach:result 后 → TTS 流式合成 reply → voice:ttsChunk（首句先播）
+ *    → parseCoachOutput → coach:result（含 candidates）→ TTS 流式
+ * 2. renderer send('voice:recorded', base64DataUrl) → 解码 → ASR → voice:transcript
+ *    → 自动 coach:run 流程（同 1）→ TTS 流式
  *
  * 截屏看屏：coach:run 时可选附 screenshotDataUrl；或主进程自动截屏（Plan 3 Task 2）。
  */
@@ -14,7 +14,7 @@ import { run } from '@openai/agents';
 import { ReplyCoach, buildUserInput, parseCoachOutput } from '../modules/reply/coach.js';
 import { initProvider } from '../core/provider.js';
 import { log } from '../core/log.js';
-import { synthesizeSpeechStream } from '../core/voice.js';
+import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import type { CoachOutputDTO } from '../shared/ipc.js';
 
@@ -28,8 +28,8 @@ export function registerCoachIpc(mainWindow: BrowserWindow): void {
     }
   };
 
-  ipcMain.handle('coach:run', async (_e, text: string, withScreenshot = false) => {
-    ensureInit();
+  /** coach 核心流水线：text → 截屏（可选）→ ReplyCoach → coach:result → TTS 流式。 */
+  async function runCoachPipeline(text: string, withScreenshot: boolean): Promise<void> {
     mainWindow.webContents.send('coach:loading');
     log.info('coach.run.start', { textLen: text.length, withScreenshot });
 
@@ -65,12 +65,45 @@ export function registerCoachIpc(mainWindow: BrowserWindow): void {
           mainWindow.webContents.send('voice:ttsDone');
         } catch (err) {
           log.warn('coach.tts.failed', { msg: err instanceof Error ? err.message : String(err) });
+          mainWindow.webContents.send('voice:ttsDone');
         }
       })();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       mainWindow.webContents.send('coach:error', msg);
       log.error('coach.run.error', { msg });
+    }
+  }
+
+  ipcMain.handle('coach:run', async (_e, text: string, withScreenshot = false) => {
+    ensureInit();
+    await runCoachPipeline(text, withScreenshot);
+  });
+
+  ipcMain.handle('voice:recorded', async (_e, base64DataUrl: string) => {
+    ensureInit();
+    log.info('voice.recorded', { bytes: base64DataUrl.length });
+
+    try {
+      const { mime, bytes } = parseDataUrl(base64DataUrl);
+      const audioMime = mimeToAudioMime(mime);
+      const text = (await transcribeAudio(bytes, audioMime, 'zh')).trim();
+      log.info('voice.transcript', { textLen: text.length });
+
+      if (!text) {
+        mainWindow.webContents.send('voice:error', '没听清，再说一次？');
+        return;
+      }
+      // 转写结果回填渲染层 textarea（用户可微调后重发，或自动跑 coach）
+      mainWindow.webContents.send('voice:transcript', text);
+
+      // 自动跑 coach：保留当前 screenshot 复选框状态由渲染层决定，这里默认 false
+      // 渲染层若想在语音流程也带截屏，可在 onTranscript 里自己调 runCoach(text, true)
+      await runCoachPipeline(text, false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      mainWindow.webContents.send('voice:error', msg);
+      log.error('voice.recorded.error', { msg });
     }
   });
 }

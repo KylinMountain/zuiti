@@ -19,6 +19,13 @@
         <label class="hud__check"><input type="checkbox" id="screenshot" checked /> 看屏</label>
         <button id="go">替我说</button>
       </div>
+      <div class="hud__row hud__row--voice">
+        <button id="mic" class="hud__mic" type="button" aria-label="按住说话">
+          <span class="hud__mic-dot"></span>
+          <span class="hud__mic-label">按住说话</span>
+        </button>
+        <span id="voiceState" class="hud__voicestate" hidden></span>
+      </div>
     </section>
 
     <section id="status" class="hud__status" hidden></section>

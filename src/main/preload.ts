@@ -11,6 +11,10 @@ const api = {
   runCoach: (text: string, withScreenshot = false): void => {
     ipcRenderer.send('coach:run', text, withScreenshot);
   },
+  /** 发送录制的音频（base64 data URL）给主进程做 ASR。 */
+  sendRecordedAudio: (base64DataUrl: string): void => {
+    ipcRenderer.send('voice:recorded', base64DataUrl);
+  },
   /** 监听结果。 */
   onResult: (cb: (dto: CoachOutputDTO) => void): void => {
     ipcRenderer.on('coach:result', (_e, dto: CoachOutputDTO) => cb(dto));
@@ -22,6 +26,14 @@ const api = {
   /** 监听错误。 */
   onError: (cb: (msg: string) => void): void => {
     ipcRenderer.on('coach:error', (_e, msg: string) => cb(msg));
+  },
+  /** 监听 ASR 转写结果（push-to-talk 流程）。 */
+  onTranscript: (cb: (text: string) => void): void => {
+    ipcRenderer.on('voice:transcript', (_e, text: string) => cb(text));
+  },
+  /** 监听 ASR 错误。 */
+  onVoiceError: (cb: (msg: string) => void): void => {
+    ipcRenderer.on('voice:error', (_e, msg: string) => cb(msg));
   },
   /** 监听 TTS 音频块（base64 pcm16），首句先播。 */
   onTtsChunk: (cb: (base64: string) => void): void => {

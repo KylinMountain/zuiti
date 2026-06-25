@@ -13,6 +13,7 @@ import { log } from './log.js';
 
 const ASR_MODEL = 'mimo-v2.5-asr';
 const TTS_MODEL = 'mimo-v2.5-tts';
+const DEFAULT_TTS_VOICE = '冰糖'; // 中文女声，预置音色
 
 /** ASR 语种。 */
 export type AsrLanguage = 'auto' | 'zh' | 'en';
@@ -24,6 +25,22 @@ export type AudioMime = 'audio/wav' | 'audio/mpeg' | 'audio/mp3';
 export function audioToDataUrl(bytes: Uint8Array, mime: AudioMime): string {
   const base64 = Buffer.from(bytes).toString('base64');
   return `data:${mime};base64,${base64}`;
+}
+
+/** 解析 data URL → { mime, bytes }（纯函数，可单测）。反向操作 of audioToDataUrl。 */
+export function parseDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } {
+  const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
+  if (!match || !match[1] || !match[2]) throw new Error(`非法 data URL: ${dataUrl.slice(0, 40)}...`);
+  const mime = match[1];
+  const bytes = Uint8Array.from(Buffer.from(match[2], 'base64'));
+  return { mime, bytes };
+}
+
+/** data URL 的 mime → AudioMime（ASR 接受的格式）。不识别的 mime 回退 wav。 */
+export function mimeToAudioMime(mime: string): AudioMime {
+  if (mime === 'audio/wav' || mime === 'audio/x-wav' || mime === 'audio/wave') return 'audio/wav';
+  if (mime === 'audio/mpeg' || mime === 'audio/mp3') return 'audio/mp3';
+  return 'audio/wav';
 }
 
 /** 构造 ASR 请求体（纯函数，可单测）。 */
@@ -41,11 +58,12 @@ export function buildAsrBody(audioDataUrl: string, language: AsrLanguage = 'zh')
 }
 
 /** 构造 TTS 请求体（纯函数，可单测）。文本放 role:assistant，风格用 (风格) 标签。 */
-export function buildTtsBody(text: string, style?: string): unknown {
+export function buildTtsBody(text: string, style?: string, voice: string = DEFAULT_TTS_VOICE): unknown {
   const content = style ? `(${style})${text}` : text;
   return {
     model: TTS_MODEL,
     messages: [{ role: 'assistant', content }],
+    audio: { format: 'pcm16', voice },
     stream: true,
   };
 }
@@ -127,8 +145,9 @@ export async function* synthesizeSpeechStream(
       const payload = trimmed.slice(5).trim();
       if (payload === '[DONE]') return;
       try {
-        const chunk = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] };
-        const b64 = chunk.choices?.[0]?.delta?.content;
+        // MiMo TTS 流式返回：delta.audio.data（base64 pcm16），不是 delta.content
+        const chunk = JSON.parse(payload) as { choices?: { delta?: { audio?: { data?: string }; content?: string } }[] };
+        const b64 = chunk.choices?.[0]?.delta?.audio?.data ?? chunk.choices?.[0]?.delta?.content;
         if (b64) {
           chunkCount++;
           yield Buffer.from(b64, 'base64');
