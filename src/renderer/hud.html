@@ -20,10 +20,12 @@
         <button id="go">替我说</button>
       </div>
       <div class="hud__row hud__row--voice">
-        <button id="mic" class="hud__mic" type="button" aria-label="按住说话">
+        <button id="mic" class="hud__mic" type="button" aria-label="点一下说话">
           <span class="hud__mic-dot"></span>
-          <span class="hud__mic-label">按住说话</span>
+          <span class="hud__mic-label">点一下说话</span>
         </button>
+        <label class="hud__check"><input type="checkbox" id="vadAuto" checked /> VAD 自动停</label>
+        <label class="hud__check"><input type="checkbox" id="wakeListen" /> 耳听八方（喊 Jarvis）</label>
         <span id="voiceState" class="hud__voicestate" hidden></span>
       </div>
     </section>
@@ -41,6 +43,6 @@
     </section>
   </div>
 
-  <script src="hud.js"></script>
+  <script type="module" src="hud.js"></script>
 </body>
 </html>

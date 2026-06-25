@@ -17,6 +17,7 @@ import { log } from '../core/log.js';
 import { ReplyExtractor } from '../core/streamparse.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
+import { containsWakeWord } from '../core/wakeword.js';
 import type { CoachOutputDTO } from '../shared/ipc.js';
 
 /** 从一个 SDK raw stream event 提取文本 delta（兼容 responses API 与 chat_completions API）。 */
@@ -104,35 +105,74 @@ export function registerCoachIpc(mainWindow: BrowserWindow): void {
     }
   }
 
-  ipcMain.handle('coach:run', async (_e, text: string, withScreenshot = false) => {
+  // 注意：preload 用 ipcRenderer.send（fire-and-forget），主进程用 ipcMain.on。
+  // 之前误用 ipcMain.handle（只匹配 invoke），已修正。
+  ipcMain.on('coach:run', (_e, text: string, withScreenshot = false) => {
     ensureInit();
-    await runCoachPipeline(text, withScreenshot);
+    void runCoachPipeline(text, withScreenshot);
   });
 
-  ipcMain.handle('voice:recorded', async (_e, base64DataUrl: string) => {
+  /** voice:recorded → ASR → voice:transcript → 自动 coach 流水线（点一下说话模式）。 */
+  ipcMain.on('voice:recorded', (_e, base64DataUrl: string) => {
     ensureInit();
     log.info('voice.recorded', { bytes: base64DataUrl.length });
 
-    try {
-      const { mime, bytes } = parseDataUrl(base64DataUrl);
-      const audioMime = mimeToAudioMime(mime);
-      const text = (await transcribeAudio(bytes, audioMime, 'zh')).trim();
-      log.info('voice.transcript', { textLen: text.length });
+    void (async () => {
+      try {
+        const { mime, bytes } = parseDataUrl(base64DataUrl);
+        const audioMime = mimeToAudioMime(mime);
+        const text = (await transcribeAudio(bytes, audioMime, 'zh')).trim();
+        log.info('voice.transcript', { textLen: text.length });
 
-      if (!text) {
-        mainWindow.webContents.send('voice:error', '没听清，再说一次？');
-        return;
+        if (!text) {
+          mainWindow.webContents.send('voice:error', '没听清，再说一次？');
+          return;
+        }
+        mainWindow.webContents.send('voice:transcript', text);
+        await runCoachPipeline(text, false);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        mainWindow.webContents.send('voice:error', msg);
+        log.error('voice.recorded.error', { msg });
       }
-      // 转写结果回填渲染层 textarea（用户可微调后重发，或自动跑 coach）
-      mainWindow.webContents.send('voice:transcript', text);
+    })();
+  });
 
-      // 自动跑 coach：保留当前 screenshot 复选框状态由渲染层决定，这里默认 false
-      // 渲染层若想在语音流程也带截屏，可在 onTranscript 里自己调 runCoach(text, true)
-      await runCoachPipeline(text, false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      mainWindow.webContents.send('voice:error', msg);
-      log.error('voice.recorded.error', { msg });
-    }
+  /**
+   * voice:wakeCheck → ASR → containsWakeWord 判定。
+   * - 命中：voice:transcript 回填 + 自动跑 coach 流水线（带截图）。
+   * - 未命中：voice:wakeMiss（渲染层继续监听）。
+   *
+   * 耳听八方模式专用：持续监听麦克，每段话先 ASR 再判定是否含"Jarvis"。
+   * 命中即唤醒，整段当命令送 coach（"Jarvis 帮我怼回去" 一句话搞定）。
+   */
+  ipcMain.on('voice:wakeCheck', (_e, base64DataUrl: string) => {
+    ensureInit();
+    log.info('voice.wakeCheck', { bytes: base64DataUrl.length });
+
+    void (async () => {
+      try {
+        const { mime, bytes } = parseDataUrl(base64DataUrl);
+        const audioMime = mimeToAudioMime(mime);
+        const text = (await transcribeAudio(bytes, audioMime, 'auto')).trim();
+        log.info('voice.wakeCheck.asr', { textLen: text.length, hit: containsWakeWord(text) });
+
+        if (!text) {
+          mainWindow.webContents.send('voice:wakeMiss', '');
+          return;
+        }
+        if (!containsWakeWord(text)) {
+          mainWindow.webContents.send('voice:wakeMiss', text);
+          return;
+        }
+        // 命中唤醒词：整段当命令，回填 + 自动跑 coach（带截图，唤醒后看屏）
+        mainWindow.webContents.send('voice:transcript', text);
+        await runCoachPipeline(text, true);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        mainWindow.webContents.send('voice:error', msg);
+        log.error('voice.wakeCheck.error', { msg });
+      }
+    })();
   });
 }

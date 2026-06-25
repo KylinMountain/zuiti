@@ -1,7 +1,9 @@
-// 嘴替 HUD 渲染逻辑 —— 监听 IPC、渲染卡片、点即复制、TTS 播放、按住说话。
+// 嘴替 HUD 渲染逻辑 —— 监听 IPC、渲染卡片、点即复制、TTS 播放、点一下说话（VAD 自动停 / 按住 fallback）。
 // 通过 window.zuiti（preload 暴露）与主进程通信。
-/* global window, document, AudioContext, navigator, MediaRecorder, Blob, DataView, Uint8Array, ArrayBuffer, btoa */
+/* global window, document, AudioContext, navigator, MediaRecorder, Blob, DataView, Uint8Array, ArrayBuffer, btoa, AnalyserNode */
 'use strict';
+
+import { VadDetector, computeRms } from './vad.js';
 
 const api = window.zuiti;
 
@@ -16,6 +18,8 @@ const $reply = document.getElementById('reply');
 const $candidates = document.getElementById('candidates');
 const $rationale = document.getElementById('rationale');
 const $screenshot = document.getElementById('screenshot');
+const $vadAuto = document.getElementById('vadAuto');
+const $wakeListen = document.getElementById('wakeListen');
 
 // TTS 流式播放：用 AudioContext 拼接 pcm16 块，首句先播
 let audioCtx = null;
@@ -44,23 +48,27 @@ $text.addEventListener('keydown', (e) => {
   }
 });
 
-// ============ 按住说话（push-to-talk）============
-// 流程：mousedown 开麦录音 → mouseup 停止 → webm blob → decodeAudioData → 手写 WAV → base64 → IPC
+// ============ 录音（点一下说话 + VAD 自动停 + 按住 fallback） ============
 let mediaRecorder = null;
 let audioChunks = [];
 let micStream = null;
 let recording = false;
+let analyser = null;
+let vad = null;
+let vadTimer = null;
+let vadPendingStart = false; // VAD 触发后真正开始录
+let pressedHoldMode = false; // 按住说话模式（mousedown→mouseup）
 
 function setRecordingState(on) {
   recording = on;
   if (on) {
     $mic.classList.add('hud__mic--recording');
-    $micLabel.textContent = '松开发送';
+    $micLabel.textContent = '再说一句…';
     $voiceState.hidden = false;
-    $voiceState.textContent = '录音中…';
+    $voiceState.textContent = $vadAuto.checked ? '听你说…说完自动发' : '录音中…';
   } else {
     $mic.classList.remove('hud__mic--recording');
-    $micLabel.textContent = '按住说话';
+    $micLabel.textContent = '点一下说话';
   }
 }
 
@@ -70,23 +78,66 @@ async function startRecording() {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-    // MediaRecorder 默认产 audio/webm;codecs=opus，MiMo ASR 要 wav，后面转
-    mediaRecorder = new MediaRecorder(micStream);
     audioChunks = [];
+    mediaRecorder = new MediaRecorder(micStream);
     mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) audioChunks.push(e.data);
     };
     mediaRecorder.onstop = handleRecordingStop;
-    mediaRecorder.start();
+
     setRecordingState(true);
+
+    if ($vadAuto.checked) {
+      // VAD 自动模式：开 AnalyserNode + VadDetector，先空录等说话
+      const ac = ensureAudioCtx();
+      const source = ac.createMediaStreamSource(micStream);
+      analyser = ac.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      vadPendingStart = false;
+      vad = new VadDetector({
+        tickMs: 100,
+        onStateChange: (state, info) => {
+          if (state === 'speaking' && !vadPendingStart) {
+            vadPendingStart = true;
+            // 真正开始 MediaRecorder（之前的 buffer 不录，避免环境噪音前导）
+            mediaRecorder.start();
+            $voiceState.textContent = '在说…说完自动停';
+          } else if (state === 'silence' && vadPendingStart && recording) {
+            // 说话结束 → 停录音
+            $voiceState.textContent = '识别中…';
+            stopRecording(true);
+          }
+        },
+      });
+      vadTimer = setInterval(() => {
+        if (!analyser) return;
+        vad.feed(computeRms(analyser));
+      }, 100);
+    } else {
+      // 按住模式：立刻开始录
+      mediaRecorder.start();
+    }
   } catch (err) {
     $voiceState.hidden = false;
     $voiceState.textContent = '麦克风不可用：' + (err && err.message ? err.message : String(err));
   }
 }
 
-function stopRecording() {
+function stopRecording(autoMode = false) {
   if (!recording) return;
+  // 清 VAD timer
+  if (vadTimer) {
+    clearInterval(vadTimer);
+    vadTimer = null;
+  }
+  if (vad) {
+    vad = null;
+  }
+  if (analyser) {
+    try { analyser.disconnect(); } catch {}
+    analyser = null;
+  }
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
@@ -95,10 +146,15 @@ function stopRecording() {
     micStream = null;
   }
   setRecordingState(false);
+  // 按住模式：松手立刻送 ASR；VAD 模式：stopRecording 已被 onStateChange 调用，不再额外动作
+  void autoMode;
 }
 
 async function handleRecordingStop() {
-  if (audioChunks.length === 0) return;
+  if (audioChunks.length === 0) {
+    $voiceState.hidden = true;
+    return;
+  }
   $voiceState.hidden = false;
   $voiceState.textContent = '识别中…';
   try {
@@ -164,26 +220,51 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
-// 鼠标 + 触摸都要支持
+// 点击 mic 按钮：VAD 模式 = 切换开/关；按住模式 = mousedown 开 / mouseup 停
+// 但二者都用 click 事件简化：click 时如果没在录，开录；如果在录，停
+// 按住 fallback：用 mousedown/touchstart 时按住说话
+$mic.addEventListener('click', () => {
+  if (recording) {
+    // 手动停（用户等不及 VAD）
+    stopRecording(false);
+  } else {
+    startRecording();
+  }
+});
+
+// 按住 fallback（VAD 关闭时启用）：mousedown 开 / mouseup 停
+function shouldUseHoldMode() {
+  return !$vadAuto.checked;
+}
+
 $mic.addEventListener('mousedown', (e) => {
+  if (!shouldUseHoldMode() || recording) return;
   e.preventDefault();
+  pressedHoldMode = true;
   startRecording();
 });
 $mic.addEventListener('touchstart', (e) => {
+  if (!shouldUseHoldMode() || recording) return;
   e.preventDefault();
+  pressedHoldMode = true;
   startRecording();
 }, { passive: false });
 
-function release(e) {
+function endHold(e) {
+  if (!pressedHoldMode) return;
   e.preventDefault();
-  stopRecording();
+  pressedHoldMode = false;
+  stopRecording(false);
 }
-$mic.addEventListener('mouseup', release);
+$mic.addEventListener('mouseup', endHold);
 $mic.addEventListener('mouseleave', () => {
-  if (recording) stopRecording();
+  if (pressedHoldMode) {
+    pressedHoldMode = false;
+    stopRecording(false);
+  }
 });
-$mic.addEventListener('touchend', release);
-$mic.addEventListener('touchcancel', release);
+$mic.addEventListener('touchend', endHold);
+$mic.addEventListener('touchcancel', endHold);
 
 // ============ IPC 监听 ============
 
@@ -269,6 +350,116 @@ api.onTtsChunk((base64) => {
 api.onTtsDone(() => {
   ttsStartTime = 0;
 });
+
+// ============ 耳听八方（持续监听 Jarvis） ============
+// 状态机：off → listening → waked（命中）→ processing → listening
+// listening：持续开麦 + VAD 录到一段 → sendWakeAudio → 等 voice:wakeMiss / voice:transcript
+// waked/processing：主进程已自动跑 coach，渲染层只显示
+let wakeStream = null;
+let wakeAnalyser = null;
+let wakeVad = null;
+let wakeTimer = null;
+let wakeMediaRecorder = null;
+let wakeChunks = [];
+let wakeListening = false;
+
+async function startWakeListening() {
+  if (wakeListening) return;
+  try {
+    wakeStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    const ac = ensureAudioCtx();
+    const source = ac.createMediaStreamSource(wakeStream);
+    wakeAnalyser = ac.createAnalyser();
+    wakeAnalyser.fftSize = 1024;
+    source.connect(wakeAnalyser);
+
+    wakeListening = true;
+    $voiceState.hidden = false;
+    $voiceState.textContent = '👂 耳听八方（喊 Jarvis）…';
+
+    wakeVad = new VadDetector({
+      tickMs: 100,
+      triggerMs: 600,
+      silenceMs: 1000,
+      onStateChange: (state) => {
+        if (state === 'speaking' && !wakeMediaRecorder) {
+          // 开始录这一段
+          wakeChunks = [];
+          wakeMediaRecorder = new MediaRecorder(wakeStream);
+          wakeMediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) wakeChunks.push(e.data);
+          };
+          wakeMediaRecorder.onstop = handleWakeStop;
+          wakeMediaRecorder.start();
+        } else if (state === 'silence' && wakeMediaRecorder && wakeMediaRecorder.state === 'recording') {
+          wakeMediaRecorder.stop();
+          wakeMediaRecorder = null;
+        }
+      },
+    });
+    wakeTimer = setInterval(() => {
+      if (!wakeAnalyser || !wakeVad) return;
+      wakeVad.feed(computeRms(wakeAnalyser));
+    }, 100);
+  } catch (err) {
+    $voiceState.hidden = false;
+    $voiceState.textContent = '麦克风不可用：' + (err && err.message ? err.message : String(err));
+    $wakeListen.checked = false;
+  }
+}
+
+function stopWakeListening() {
+  if (!wakeListening) return;
+  if (wakeTimer) { clearInterval(wakeTimer); wakeTimer = null; }
+  if (wakeMediaRecorder && wakeMediaRecorder.state === 'recording') {
+    try { wakeMediaRecorder.stop(); } catch {}
+  }
+  wakeMediaRecorder = null;
+  if (wakeAnalyser) { try { wakeAnalyser.disconnect(); } catch {} wakeAnalyser = null; }
+  if (wakeStream) { wakeStream.getTracks().forEach((t) => t.stop()); wakeStream = null; }
+  wakeVad = null;
+  wakeListening = false;
+  $voiceState.hidden = true;
+}
+
+async function handleWakeStop() {
+  if (wakeChunks.length === 0) return;
+  // 临时切状态：识别中
+  $voiceState.textContent = '🎧 识别中…';
+  try {
+    const blob = new Blob(wakeChunks, { type: 'audio/webm' });
+    const arrayBuf = await blob.arrayBuffer();
+    const tmpCtx = new AudioContext();
+    const audioBuf = await tmpCtx.decodeAudioData(arrayBuf);
+    tmpCtx.close();
+    const wavBytes = encodeWav(audioBuf);
+    const base64 = bytesToBase64(wavBytes);
+    api.sendWakeAudio('data:audio/wav;base64,' + base64);
+    // 等主进程 voice:wakeMiss 或 voice:transcript
+  } catch (err) {
+    $voiceState.textContent = '音频处理失败：' + (err && err.message ? err.message : String(err));
+  }
+}
+
+$wakeListen.addEventListener('change', () => {
+  if ($wakeListen.checked) {
+    void startWakeListening();
+  } else {
+    stopWakeListening();
+  }
+});
+
+api.onWakeMiss((_text) => {
+  // 未命中 Jarvis，继续监听
+  if (wakeListening) {
+    $voiceState.textContent = '👂 耳听八方（喊 Jarvis）…';
+  }
+});
+
+// onTranscript 已经在前面处理（回填 textarea）；
+// 命中 Jarvis 时主进程会自动跑 coach，渲染层在 onResult 时恢复耳听八方状态显示
 
 function bindCopy(btn, text) {
   btn.addEventListener('click', async () => {

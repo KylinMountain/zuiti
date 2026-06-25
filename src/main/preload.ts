@@ -15,6 +15,10 @@ const api = {
   sendRecordedAudio: (base64DataUrl: string): void => {
     ipcRenderer.send('voice:recorded', base64DataUrl);
   },
+  /** 耳听八方模式：发送音频给主进程做唤醒词判定（含 Jarvis 才跑 coach）。 */
+  sendWakeAudio: (base64DataUrl: string): void => {
+    ipcRenderer.send('voice:wakeCheck', base64DataUrl);
+  },
   /** 监听结果。 */
   onResult: (cb: (dto: CoachOutputDTO) => void): void => {
     ipcRenderer.on('coach:result', (_e, dto: CoachOutputDTO) => cb(dto));
@@ -38,6 +42,10 @@ const api = {
   /** 监听 ASR 错误。 */
   onVoiceError: (cb: (msg: string) => void): void => {
     ipcRenderer.on('voice:error', (_e, msg: string) => cb(msg));
+  },
+  /** 监听唤醒未命中（耳听八方模式继续监听）。text 是 ASR 结果（可能为空）。 */
+  onWakeMiss: (cb: (text: string) => void): void => {
+    ipcRenderer.on('voice:wakeMiss', (_e, text: string) => cb(text));
   },
   /** 监听 TTS 音频块（base64 pcm16），首句先播。 */
   onTtsChunk: (cb: (base64: string) => void): void => {
