@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCoachOutput, CoachOutput } from '../modules/reply/schema.js';
+import { buildUserInput } from '../modules/reply/coach.js';
 
 test('parseCoachOutput: 解析完整输出（reply + candidates + rationale）', () => {
   const out = parseCoachOutput(JSON.stringify({
@@ -50,4 +51,9 @@ test('CoachOutput schema: reply 是第一个键（不变量文档化）', () => 
   // zod 不强制键序，但 schema 定义里 reply 排第一，作为不变量的文档化约束。
   const keys = Object.keys(CoachOutput.shape);
   assert.equal(keys[0], 'reply');
+});
+
+test('buildUserInput: 原样返回文本（截图当前不参与文本模式）', () => {
+  assert.equal(buildUserInput('帮我接住情绪'), '帮我接住情绪');
+  assert.equal(buildUserInput('  空格保留  '), '  空格保留  ');
 });
