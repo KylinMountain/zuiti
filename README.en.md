@@ -1,12 +1,10 @@
 <div align="center">
 
-<img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=modern%20flat%20illustration%20of%20a%20desktop%20assistant%2C%20pink%20and%20deep%20purple%20gradient%2C%20speech%20bubbles%20with%20witty%20replies%2C%20microphone%20and%20screen%20icon%2C%20minimal%20playful%20style%2C%20warm%20cream%20background&image_size=landscape_16_9" alt="Zuiti hero" width="100%" />
+<img src="./docs/images/hero.jpg" alt="Zuiti hero" width="100%" />
 
 # Zuiti · You think it, it speaks it
 
 **A real always-on desktop assistant: say "Jarvis" → it auto-screenshots → you speak your mind → it gives you copy-ready witty replies.**
-
-🏆 Entry for TRAE AI Creativity Competition · Main track: Life & Entertainment
 
 [中文](./README.md) · [Showcase](./docs/showcase/zuiti.html) · [Architecture](./ARCHITECTURE.md)
 
@@ -39,7 +37,7 @@ Zuiti (嘴替, literally "mouth-double") turns that "stuck on the tip" into "nai
 
 ## Three-Step Rescue
 
-<img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=three-step%20flowchart%20infographic%2C%20step%201%20voice%20wake%20word%20Jarvis%2C%20step%202%20screenshot%20and%20speak%2C%20step%203%20copy%20witty%20reply%2C%20pink%20accent%20color%2C%20clean%20modern%20flat%20design%2C%20cream%20background&image_size=landscape_4_3" alt="Three-step flow" width="100%" />
+<img src="./docs/images/flow.jpg" alt="Three-step flow" width="100%" />
 
 | STEP 01 | STEP 02 | STEP 03 |
 |---------|---------|---------|
@@ -131,7 +129,7 @@ CI: typecheck + test on push/PR to main (`.github/workflows/ci.yml`).
 
 ## Architecture
 
-<img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=software%20architecture%20layered%20diagram%2C%20five%20layers%20from%20bottom%20to%20top%20Types%20Config%20Core%20Modules%20Main%20Renderer%2C%20arrows%20pointing%20upward%2C%20pink%20and%20purple%20color%20scheme%2C%20technical%20clean%20diagram%20style&image_size=landscape_4_3" alt="Architecture layers" width="100%" />
+<img src="./docs/images/arch.jpg" alt="Architecture layers" width="100%" />
 
 Layered dependencies flow forward only: `Types → Config → Core → Modules → Main → Renderer`.
 
