@@ -10,6 +10,7 @@ import { config as loadDotenv } from 'dotenv';
 import { ReplyCoach, buildUserInput, parseCoachOutput } from '../modules/reply/coach.js';
 import { initProvider } from '../core/provider.js';
 import { renderCoachOutput } from './render.js';
+import { log } from '../core/log.js';
 
 export { loadDotenv };
 
@@ -24,11 +25,13 @@ async function main(): Promise<void> {
   }
 
   const startedAt = Date.now();
+  log.info('coach.run.start', { text });
   const result = await run(ReplyCoach, buildUserInput(text));
   const ms = Date.now() - startedAt;
 
   const raw = (result.finalOutput ?? '').toString();
   const output = parseCoachOutput(raw);
+  log.info('coach.run.done', { ms, tokens: result.state.usage.totalTokens, replyLen: output.reply.length });
   console.log(renderCoachOutput(output));
   console.log(`\n(${ms}ms, ${result.state.usage.totalTokens} tokens)`);
 }

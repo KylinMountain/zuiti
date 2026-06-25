@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>嘴替</title>
+  <link rel="stylesheet" href="hud.css" />
+</head>
+<body>
+  <div class="hud">
+    <header class="hud__bar">
+      <span class="hud__title">嘴替</span>
+      <span class="hud__hint">你负责想，它负责嘴</span>
+    </header>
+
+    <section class="hud__input">
+      <textarea id="text" placeholder="说句真心话…（带情绪、口语都行）" rows="3"></textarea>
+      <button id="go">替我说</button>
+    </section>
+
+    <section id="status" class="hud__status" hidden></section>
+
+    <section id="result" class="hud__result" hidden>
+      <article class="card card--reply">
+        <div class="card__chip">嘴替推荐</div>
+        <p id="reply" class="card__text"></p>
+        <button class="card__copy" data-target="reply">复制</button>
+      </article>
+      <div id="candidates" class="hud__candidates"></div>
+      <p id="rationale" class="hud__rationale"></p>
+    </section>
+  </div>
+
+  <script src="hud.js"></script>
+</body>
+</html>

@@ -46,5 +46,10 @@ TRAE AI 创造力大赛参赛作品，主赛道：生活娱乐。
 
 ## 技术栈
 
-TypeScript (ESM) · Node ≥ 22 · Electron · openai-agents-js · zod · node:test
+TypeScript (ESM) · Node ≥ 22 · Electron 42 · `@openai/agents`（非已弃用的 openai-agents-js）· zod v4 · dotenv · node:test
 不引入新依赖。
+
+## Provider 配置
+
+LLM 走小米 MiMo（OpenAI 兼容），key 在 `.env`：`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`（=mimo-v2.5-pro）。
+`ASR_API_KEY` / `TTS_API_KEY` 留给 Plan 3 语音 harness。详见 [src/core/provider.ts](./src/core/provider.ts) 与 [.env.example](./.env.example)。
