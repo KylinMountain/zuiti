@@ -76,20 +76,23 @@ test('lint: modules/ 不得 import main/ renderer/', () => {
   }
 });
 
-test('lint: renderer/ 不得 import Node 侧模块（只能用 window.zuiti）', () => {
-  // renderer 是 vanilla JS，不参与 ts 编译；直接读 src/renderer/*.js
+test('lint: renderer/ 不得 import Node 侧模块（core/modules/main），可用 npm 包与 shared/ipc', () => {
+  // renderer 是 TS 源码（esbuild 打包），可 import onnxruntime-web / @picovoice/web-voice-processor 等 npm 包
+  // 红线：不得直接 import ../core/* ../modules/* ../main/*（只能经 window.zuiti 走 IPC）
   const dir = join(SRC, 'renderer');
-  let hasJs = false;
+  let hasTs = false;
   try {
     for (const name of readdirSync(dir)) {
-      if (!name.endsWith('.js')) continue;
-      hasJs = true;
+      if (!name.endsWith('.ts')) continue;
+      hasTs = true;
       const content = readFileSync(join(dir, name), 'utf8');
-      assert.doesNotMatch(content, /import\s+.*from\s+['"]\.\.\//, `${name}: renderer 不得 import Node 侧模块`);
+      assert.doesNotMatch(content, /from\s+['"]\.\.\/core/, `${name}: renderer 不得 import core/（走 window.zuiti IPC）`);
+      assert.doesNotMatch(content, /from\s+['"]\.\.\/modules/, `${name}: renderer 不得 import modules/（走 window.zuiti IPC）`);
+      assert.doesNotMatch(content, /from\s+['"]\.\.\/main/, `${name}: renderer 不得 import main/（走 window.zuiti IPC）`);
       assert.doesNotMatch(content, /require\(/, `${name}: renderer 不得用 require`);
     }
   } catch {
     // renderer 目录可能不存在（早期），跳过
   }
-  if (!hasJs) assert.ok(true, 'renderer 无 .js，跳过');
+  if (!hasTs) assert.ok(true, 'renderer 无 .ts，跳过');
 });

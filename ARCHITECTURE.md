@@ -4,7 +4,7 @@
 
 ## 一句话
 
-托盘常驻桌面应用 → 唤醒（当前：托盘点击 / 全局快捷键；Plan 3：语音"Jarvis"）→ 截屏看懂上下文（Plan 3）→ 输入真心话 → LLM 产出多条带风格标签的神回复 → 一键复制发出。
+托盘常驻桌面应用 → 唤醒（托盘点击 / 全局快捷键 / 语音"Jarvis"本地 openWakeWord）→ 截屏看懂上下文 → 输入真心话 → LLM 流式产出 reply + 多条带风格标签备选 → 一键复制发出。
 
 ## 分层模型（依赖只能"向前"）
 
@@ -12,17 +12,25 @@
 Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
                 ↑                              ↑
           Providers（跨切面）            Preload（受控 IPC 桥）
+                                          ↓
+                                   openWakeWord（本地 ONNX 推理，Plan 4）
 ```
 
-- **Types**：zod schema + 推导类型。数据形状在边界解析（parse-don't-validate）。`src/modules/reply/schema.ts`、`src/shared/ipc.ts`。
+- **Types**：zod schema + 推导类型。数据形状在边界解析（parse-don't-validate）。`src/modules/reply/schema.ts`、`src/shared/ipc.ts`（CHANNELS + WakeRuntime + Capabilities）。
 - **Config / Providers**：`src/core/provider.ts`——OpenAI 兼容端点（MiMo）适配，读 `.env`（`LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL`）。
-- **Core**：`src/core/`——harness 底座：`streamparse.ts`（ReplyExtractor）、`skill.ts`（扩展底座）、`provider.ts`、`log.ts`（结构化日志）。
+- **Core**：`src/core/`——harness 底座：`streamparse.ts`（ReplyExtractor）、`skill.ts`（扩展底座）、`provider.ts`、`log.ts`（结构化日志）、`voice.ts`（ASR/TTS）、`screenshot.ts`、`wakeword.ts`（containsWakeWord 文本判定）。
 - **Modules**：`src/modules/reply/`——嘴替 skill：`schema.ts`（CoachOutput）、`coach.ts`（ReplyCoach Agent + INSTRUCTIONS）。
-- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期）、`window.ts`（HUD 浮窗）、`tray.ts`（托盘+快捷键）、`ipc.ts`（coach:run→coach:result）、`preload.ts`（contextBridge）。
-- **Renderer (UI)**：`src/renderer/`——HUD 浮窗：`hud.html`/`hud.css`/`hud.js`（纯 vanilla JS，候选卡片点即复制）。
+- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期 + 唤醒词模型下发 + 麦克风权限）、`window.ts`（HUD 浮窗）、`tray.ts`（托盘+快捷键）、`ipc.ts`（coach:run / voice:recorded / voice:wakeCheck / capabilities）、`preload.ts`（contextBridge）。
+- **Renderer (UI)**：`src/renderer/`——HUD 浮窗 + 本地唤醒词：
+  - `hud.ts`（主入口，esbuild 打包到 `dist/renderer/hud.js`）
+  - `openwakeword.ts`（ONNX 三段推理管线，忠实复刻官方流式实现）
+  - `wakeword.ts`（WebVoiceProcessor 订阅 + 唤醒回调）
+  - `vad.ts`（纯 TS RMS VAD，silence↔speaking 状态机）
+  - `wav.ts`（Float32 PCM → pcm16 WAV 编码）
+  - `hud.html`/`hud.css`
 
 依赖方向红线（机械强制，见 `src/test/architecture.test.ts`）：
-- `renderer/` 不得 import 任何 Node 侧模块（只能用 `window.zuiti`）。
+- `renderer/` 可 import npm 包（onnxruntime-web / @picovoice/web-voice-processor）与 `../shared/ipc.ts`，但不得 import `../core/*` `../modules/*` `../main/*`（只能用 `window.zuiti`）。
 - `modules/` 不得 import `main/` 或 `renderer/`。
 - `core/` 不得 import `modules/`/`main/`/`renderer/`。
 
@@ -35,6 +43,7 @@ Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
 ```
 
 - 实现：`src/core/streamparse.ts` 的 `ReplyExtractor`。
+- 流式接入：`src/main/ipc.ts` 用 `run(ReplyCoach, ..., { stream: true })`，每 chunk 经 `ReplyExtractor.push()` 抽 reply 增量，推 `coach:replyChunk` 给渲染层蹦字（Plan 4 兑现）。
 - 约束：`CoachOutput` zod schema 里 `reply` 排第一字段。**永远不要改这个顺序。**
 - 机械强制：`src/test/architecture.test.ts` 断言 schema 第一键 + prompt 含"必须排第一"。
 
@@ -77,32 +86,44 @@ src/
 │   ├── streamparse.ts # ReplyExtractor（依赖 reply 第一键）
 │   ├── skill.ts       # skill 接口 + 注册
 │   ├── provider.ts    # MiMo/OpenAI 适配 + env 加载
-│   └── log.ts         # 结构化日志（LLM 可读 JSON lines）
+│   ├── log.ts         # 结构化日志（LLM 可读 JSON lines）
+│   ├── voice.ts       # MiMo ASR/TTS 客户端 + parseDataUrl/mimeToAudioMime
+│   ├── screenshot.ts  # 截屏（Electron desktopCapturer 动态 import）
+│   └── wakeword.ts    # containsWakeWord 文本判定（耳听八方模式用）
 ├── modules/
 │   └── reply/         # 嘴替 skill（Plan 2 从 english/ 改名）
 │       ├── schema.ts  # CoachOutput / Candidate / parseCoachOutput
-│       └── coach.ts   # ReplyCoach Agent + INSTRUCTIONS
+│       └── coach.ts   # ReplyCoach Agent + INSTRUCTIONS + buildUserInput（多模态）
 ├── cli/               # CLI 入口 + 渲染纯函数
 │   ├── coach.ts
 │   └── render.ts      # renderCoachOutput（纯函数，可单测）
 ├── shared/
-│   └── ipc.ts         # CoachOutputDTO 等跨进程类型
+│   └── ipc.ts         # CHANNELS + CoachOutputDTO + WakeRuntime + Capabilities
 ├── main/              # Electron 主进程
-│   ├── index.ts       # app 生命周期
-│   ├── window.ts      # HUD 浮窗（无框侧贴）
+│   ├── index.ts       # app 生命周期 + 唤醒词模型下发 + 麦克风权限
+│   ├── window.ts      # HUD 浮窗（无框侧贴，loadFile dist/renderer/hud.html）
 │   ├── tray.ts        # 托盘 + 全局快捷键
-│   ├── ipc.ts         # coach:run → ReplyCoach → coach:result
+│   ├── ipc.ts         # coach:run / voice:recorded / voice:wakeCheck / capabilities
 │   └── preload.ts     # contextBridge → window.zuiti
-├── renderer/          # HUD 浮窗（vanilla JS，候选卡片点即复制）
+├── renderer/          # HUD 浮窗 + 本地唤醒词（esbuild 打包到 dist/renderer/hud.js）
+│   ├── hud.ts         # 主入口（capabilities + initWakeWord + VAD + TTS 播放）
+│   ├── openwakeword.ts# ONNX 三段推理管线（melspec → embedding → hey_jarvis）
+│   ├── wakeword.ts    # WebVoiceProcessor 订阅 + 唤醒回调
+│   ├── vad.ts         # 纯 TS RMS VAD（silence↔speaking 状态机）
+│   ├── wav.ts         # Float32 PCM → pcm16 WAV 编码
 │   ├── hud.html
-│   ├── hud.css
-│   └── hud.js
+│   └── hud.css
 └── test/              # node:test
+scripts/
+├── fetch-wake-models.mjs  # 下载 openWakeWord 3 个 ONNX 到 models/
+└── copy-assets.mjs        # 拷 html/css + onnx wasm 到 dist/renderer/
+models/                # openWakeWord ONNX 模型（不入库，由 fetch-models 下载）
 ```
 
 ## 不做的事（红线）
 
 - **不持续监视屏幕主动弹窗**——只在被唤醒时看一次屏。
+- **唤醒判断只在本地**——openWakeWord 跑在浏览器 WASM，不上云、不联网、无需 API Key（隐私向亮点）。
 - **对线不做网暴**——机智回怼，非人身攻击。
 - **不用 SDK outputType**——见不变量 2。
 - **不改 `reply` 第一键顺序**——见不变量 1。
