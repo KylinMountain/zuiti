@@ -1,8 +1,10 @@
 /**
  * 托盘常驻 —— 嘴替的入口。
  *
- * 语音唤醒（"Jarvis"）是 Plan 3 的 harness 工作；当前以托盘点击 + 全局快捷键
- * （Cmd+Shift+J / Ctrl+Shift+J）作为唤醒的临时触发。
+ * 唤醒方式（三种并存）：
+ * - 本地 openWakeWord 声学唤醒（Plan 4，渲染层 ONNX 推理）
+ * - 全局快捷键 Cmd+Shift+J / Ctrl+Shift+J
+ * - 托盘点击
  */
 import { Tray, Menu, globalShortcut, nativeImage, type BrowserWindow } from 'electron';
 import { fileURLToPath } from 'node:url';
