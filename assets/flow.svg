@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 280" width="900" height="280" role="img" aria-label="三步救场流程">
+  <rect width="900" height="280" fill="#FFF6EE"/>
+  <g font-family="PingFang SC, system-ui, sans-serif">
+    <!-- Step 1 -->
+    <rect x="30" y="40" width="260" height="200" rx="18" fill="#FFFFFF" stroke="rgba(24,19,32,0.12)"/>
+    <text x="50" y="78" font-size="13" font-weight="700" fill="#FF2D6B" letter-spacing="2">STEP 01</text>
+    <text x="50" y="118" font-size="22" font-weight="800" fill="#181320">喊一声「Jarvis」</text>
+    <text x="50" y="152" font-size="14" fill="#7C7689">它就醒了——顺手把</text>
+    <text x="50" y="172" font-size="14" fill="#7C7689">当前屏幕看了个明白，</text>
+    <text x="50" y="192" font-size="14" fill="#7C7689">知道你在跟谁聊。</text>
+    <text x="50" y="222" font-size="28">🎙️</text>
+
+    <!-- Arrow 1 -->
+    <path d="M 300 140 L 320 140" stroke="#FF2D6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- Step 2 -->
+    <rect x="320" y="40" width="260" height="200" rx="18" fill="#FFFFFF" stroke="rgba(24,19,32,0.12)"/>
+    <text x="340" y="78" font-size="13" font-weight="700" fill="#FF2D6B" letter-spacing="2">STEP 02</text>
+    <text x="340" y="118" font-size="22" font-weight="800" fill="#181320">说句人话</text>
+    <text x="340" y="152" font-size="14" fill="#7C7689">中文、口语、带情绪</text>
+    <text x="340" y="172" font-size="14" fill="#7C7689">都行："帮我接住，</text>
+    <text x="340" y="192" font-size="14" fill="#7C7689">但别太舔。"</text>
+    <text x="340" y="222" font-size="28">💬</text>
+
+    <!-- Arrow 2 -->
+    <path d="M 590 140 L 610 140" stroke="#FF2D6B" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <!-- Step 3 -->
+    <rect x="610" y="40" width="260" height="200" rx="18" fill="#FFFFFF" stroke="rgba(24,19,32,0.12)"/>
+    <text x="630" y="78" font-size="13" font-weight="700" fill="#FF2D6B" letter-spacing="2">STEP 03</text>
+    <text x="630" y="118" font-size="22" font-weight="800" fill="#181320">挑一条发出去</text>
+    <text x="630" y="152" font-size="14" fill="#7C7689">三条神回复任选，</text>
+    <text x="630" y="172" font-size="14" fill="#7C7689">可切风格，一键复制。</text>
+    <text x="630" y="192" font-size="14" fill="#7C7689">搞定。</text>
+    <text x="630" y="222" font-size="28">✨</text>
+  </g>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#FF2D6B"/>
+    </marker>
+  </defs>
+</svg>

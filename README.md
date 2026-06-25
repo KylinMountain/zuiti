@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="./docs/images/hero.svg" alt="嘴替 hero" width="100%" />
+<img src="./assets/hero.svg" alt="嘴替 hero" width="100%" />
 
 # 嘴替 · 你负责想，它负责嘴
 
 **真·常驻桌面助手：喊一声「Jarvis」→ 自动看屏 → 你语音说真心话 → 它给你几条能直接发的神回复，一键复制。**
 
-[English](./README.en.md) · [展示页](./docs/showcase/zuiti.html) · [架构文档](./ARCHITECTURE.md)
+[English](./README.en.md) · [展示页](./showcase/index.html) · [架构文档](./ARCHITECTURE.md)
 
 </div>
 
@@ -37,7 +37,7 @@
 
 ## 三步救场
 
-<img src="./docs/images/flow.svg" alt="三步救场流程" width="100%" />
+<img src="./assets/flow.svg" alt="三步救场流程" width="100%" />
 
 | STEP 01 | STEP 02 | STEP 03 |
 |---------|---------|---------|
@@ -138,7 +138,7 @@ CI：push / PR 到 main 时自动跑 typecheck + test（`.github/workflows/ci.ym
 
 ## 架构
 
-<img src="./docs/images/arch.svg" alt="架构分层" width="100%" />
+<img src="./assets/arch.svg" alt="架构分层" width="100%" />
 
 分层依赖只向前：`Types → Config → Core → Modules → Main → Renderer`。
 
@@ -167,16 +167,23 @@ src/
 
 ## 文档
 
-- [设计文档](./docs/design-docs/2026-06-24-zuiti-design.md) — 产品定位 / 创意 / 痛点 / Hero 场景
 - [架构文档](./ARCHITECTURE.md) — 分层 / 不变量 / 目录结构
-- [执行计划](./docs/PLANS.md) — Plan 1-5 已完成，Plan 6（读向技能）待启动
-- [质量评分](./docs/QUALITY_SCORE.md) — 各域质量自评
-- [展示页](./docs/showcase/zuiti.html) — 完整视觉展示
+- [展示页](./showcase/index.html) — 完整视觉展示
+
+> 设计文档、执行计划、参赛资料为私有，不公开。
 
 ---
 
 <div align="center">
 
 **嘴替上线，回回封神。**
+
+</div>
+
+---
+
+<div align="center">
+
+Copyright © 2026 mountain · [All Rights Reserved](./LICENSE)
 
 </div>

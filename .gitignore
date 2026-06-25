@@ -30,3 +30,6 @@ npm-debug.log*
 # Test coverage
 coverage/
 .nyc_output/
+
+# Internal docs (design/competition/plans — 参赛期间不公开)
+docs/

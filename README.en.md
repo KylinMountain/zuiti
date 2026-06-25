@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="./docs/images/hero.svg" alt="Zuiti hero" width="100%" />
+<img src="./assets/hero.svg" alt="Zuiti hero" width="100%" />
 
 # Zuiti · You think it, it speaks it
 
 **A real always-on desktop assistant: say "Jarvis" → it auto-screenshots → you speak your mind → it gives you copy-ready witty replies.**
 
-[中文](./README.md) · [Showcase](./docs/showcase/zuiti.html) · [Architecture](./ARCHITECTURE.md)
+[中文](./README.md) · [Showcase](./showcase/index.html) · [Architecture](./ARCHITECTURE.md)
 
 </div>
 
@@ -129,7 +129,7 @@ CI: typecheck + test on push/PR to main (`.github/workflows/ci.yml`).
 
 ## Architecture
 
-<img src="./docs/images/arch.svg" alt="Architecture layers" width="100%" />
+<img src="./assets/arch.svg" alt="Architecture layers" width="100%" />
 
 Layered dependencies flow forward only: `Types → Config → Core → Modules → Main → Renderer`.
 
@@ -158,16 +158,23 @@ The base is a general "screen + voice + skill" engine that keeps spawning new sc
 
 ## Docs
 
-- [Design doc (zh)](./docs/design-docs/2026-06-24-zuiti-design.md) — Product positioning / creativity / pain points / hero scenarios
 - [Architecture](./ARCHITECTURE.md) — Layers / invariants / directory structure
-- [Plans](./docs/PLANS.md) — Plan 1-5 completed, Plan 6 (reading skills) pending
-- [Quality score](./docs/QUALITY_SCORE.md) — Per-domain self-assessment
-- [Showcase](./docs/showcase/zuiti.html) — Full visual presentation
+- [Showcase](./showcase/index.html) — Full visual presentation
+
+> Design docs, execution plans, and competition materials are private.
 
 ---
 
 <div align="center">
 
 **Zuiti online, nail it every time.**
+
+</div>
+
+---
+
+<div align="center">
+
+Copyright © 2026 mountain · [All Rights Reserved](./LICENSE)
 
 </div>
