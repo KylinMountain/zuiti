@@ -1,0 +1,2 @@
+# openWakeWord ONNX 模型不入库（约 10MB，由 scripts/fetch-wake-models.mjs 下载）
+*.onnx

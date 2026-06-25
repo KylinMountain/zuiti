@@ -10,20 +10,26 @@
   },
   "scripts": {
     "build:node": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:renderer": "esbuild src/renderer/hud.ts --bundle --format=esm --target=chrome120 --outfile=dist/renderer/hud.js && node scripts/copy-assets.mjs",
+    "build": "npm run build:node && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "test": "npm run build:node && node --test \"dist/test/*.test.js\"",
     "coach": "npm run build:node && node dist/cli/coach.js",
-    "start": "npm run build:node && electron .",
-    "dev": "npm run build:node && electron . --enable-logging"
+    "fetch-models": "node scripts/fetch-wake-models.mjs",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --enable-logging"
   },
   "dependencies": {
     "@openai/agents": "^0.12.0",
+    "@picovoice/web-voice-processor": "^4.0.10",
     "dotenv": "^16.4.5",
+    "onnxruntime-web": "^1.27.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "electron": "^42.5.0",
+    "esbuild": "^0.28.1",
     "typescript": "^5.6.0"
   }
 }

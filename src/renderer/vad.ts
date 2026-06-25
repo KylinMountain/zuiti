@@ -1,4 +1,4 @@
-// VAD（Voice Activity Detection）—— 纯 JS RMS 能量检测，无依赖。
+// VAD（Voice Activity Detection）—— 纯 TS RMS 能量检测，无依赖。
 //
 // 状态机：
 //   silence →（连续 triggerMs RMS≥triggerThreshold）→ speaking
@@ -13,8 +13,19 @@
 // 持续监听场景：onStateChange('speaking') 时开 MediaRecorder，'silence' 时停。
 // 唤醒后自动录场景：开麦后等 'speaking' 转回 'silence' 即停。
 
+export type VadState = 'silence' | 'speaking';
+
+export interface VadOptions {
+  triggerThreshold?: number;
+  silenceThreshold?: number;
+  triggerMs?: number;
+  silenceMs?: number;
+  tickMs?: number;
+  onStateChange?: (state: VadState, info?: { speechMs: number }) => void;
+}
+
 /** 默认参数（针对普通桌面麦克风、有环境噪音的场景调过）。 */
-const DEFAULTS = {
+const DEFAULTS: Required<Omit<VadOptions, 'onStateChange'>> = {
   triggerThreshold: 0.05, // 开始说话的 RMS 阈值（0-1）
   silenceThreshold: 0.02, // 说话结束的 RMS 阈值（更严，避免尾音误判）
   triggerMs: 500, // 连续 500ms 有声 → 判定开始说话
@@ -24,27 +35,19 @@ const DEFAULTS = {
 
 /** VAD 状态机。 */
 export class VadDetector {
-  /**
-   * @param {Object} opts
-   * @param {number} [opts.triggerThreshold]
-   * @param {number} [opts.silenceThreshold]
-   * @param {number} [opts.triggerMs]
-   * @param {number} [opts.silenceMs]
-   * @param {number} [opts.tickMs]
-   * @param {(state: 'silence'|'speaking', info?: {speechMs:number}) => void} [opts.onStateChange]
-   */
-  constructor(opts = {}) {
+  private opts: Required<Omit<VadOptions, 'onStateChange'>> & Pick<VadOptions, 'onStateChange'>;
+  private state: VadState = 'silence';
+  private silenceTimer = 0;
+  private speechTimer = 0;
+  private speechStartMs = 0;
+  private lastSpeechMs = 0;
+
+  constructor(opts: VadOptions = {}) {
     this.opts = { ...DEFAULTS, ...opts };
-    /** @type {'silence'|'speaking'} */
-    this.state = 'silence';
-    this.silenceTimer = 0;
-    this.speechTimer = 0;
-    this.speechStartMs = 0;
-    this.lastSpeechMs = 0;
   }
 
   /** 重置状态机。 */
-  reset() {
+  reset(): void {
     this.state = 'silence';
     this.silenceTimer = 0;
     this.speechTimer = 0;
@@ -52,12 +55,8 @@ export class VadDetector {
     this.lastSpeechMs = 0;
   }
 
-  /**
-   * 喂入 RMS 值（0-1），返回当前状态。
-   * @param {number} rms
-   * @returns {'silence'|'speaking'}
-   */
-  feed(rms) {
+  /** 喂入 RMS 值（0-1），返回当前状态。 */
+  feed(rms: number): VadState {
     const { triggerThreshold, silenceThreshold, triggerMs, silenceMs, tickMs, onStateChange } = this.opts;
 
     if (this.state === 'silence') {
@@ -90,12 +89,8 @@ export class VadDetector {
   }
 }
 
-/**
- * 从 AnalyserNode 取当前一帧的 RMS（0-1）。
- * @param {AnalyserNode} analyser
- * @returns {number}
- */
-export function computeRms(analyser) {
+/** 从 AnalyserNode 取当前一帧的 RMS（0-1）。 */
+export function computeRms(analyser: AnalyserNode): number {
   const buf = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(buf);
   let sumSq = 0;

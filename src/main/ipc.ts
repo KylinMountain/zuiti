@@ -18,7 +18,7 @@ import { ReplyExtractor } from '../core/streamparse.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import { containsWakeWord } from '../core/wakeword.js';
-import type { CoachOutputDTO } from '../shared/ipc.js';
+import { CHANNELS, type Capabilities, type CoachOutputDTO, type WakeRuntime } from '../shared/ipc.js';
 
 /** 从一个 SDK raw stream event 提取文本 delta（兼容 responses API 与 chat_completions API）。 */
 function extractDelta(data: unknown): string {
@@ -32,8 +32,11 @@ function extractDelta(data: unknown): string {
   return typeof c === 'string' ? c : '';
 }
 
-/** 注册 coach + voice IPC handlers。主进程启动时调用一次。 */
-export function registerCoachIpc(mainWindow: BrowserWindow): void {
+/**
+ * 注册 coach + voice + capabilities IPC handlers。主进程启动时调用一次。
+ * @param wake 唤醒词运行时（null 时功能关闭，渲染层不启动 openWakeWord）。
+ */
+export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): void {
   let inited = false;
   const ensureInit = (): void => {
     if (!inited) {
@@ -41,6 +44,13 @@ export function registerCoachIpc(mainWindow: BrowserWindow): void {
       inited = true;
     }
   };
+
+  /** 渲染层启动时查询能力：asr/tts 是否可用 + wake 运行时（含模型 base64）。 */
+  ipcMain.handle(CHANNELS.capabilities, async (): Promise<Capabilities> => ({
+    asr: true,
+    tts: true,
+    wake,
+  }));
 
   /** coach 核心流水线：text → 截屏（可选）→ ReplyCoach 流式 → coach:result → TTS 流式。 */
   async function runCoachPipeline(text: string, withScreenshot: boolean): Promise<void> {

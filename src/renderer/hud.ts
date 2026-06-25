@@ -1,36 +1,62 @@
-// 嘴替 HUD 渲染逻辑 —— 监听 IPC、渲染卡片、点即复制、TTS 播放、点一下说话（VAD 自动停 / 按住 fallback）。
+// 嘴替 HUD 渲染逻辑 —— 监听 IPC、渲染卡片、点即复制、TTS 播放、点一下说话（VAD 自动停）。
 // 通过 window.zuiti（preload 暴露）与主进程通信。
-/* global window, document, AudioContext, navigator, MediaRecorder, Blob, DataView, Uint8Array, ArrayBuffer, btoa, AnalyserNode */
+// esbuild 把本文件打包成 dist/renderer/hud.js（ESM）。
+/* global window, document, AudioContext, navigator, MediaRecorder, Blob, DataView, Uint8Array, ArrayBuffer, btoa, AnalyserNode, atob */
 'use strict';
 
 import { VadDetector, computeRms } from './vad.js';
+import { initWakeWord } from './wakeword.js';
+import { encodeWav } from './wav.js';
+import type { Capabilities, CoachOutputDTO } from '../shared/ipc.js';
+
+declare global {
+  interface Window {
+    zuiti: {
+      capabilities(): Promise<Capabilities>;
+      wake(): void;
+      runCoach(text: string, withScreenshot?: boolean): void;
+      sendRecordedAudio(base64DataUrl: string): void;
+      sendWakeAudio(base64DataUrl: string): void;
+      onActivate(cb: () => void): void;
+      onResult(cb: (dto: CoachOutputDTO) => void): void;
+      onLoading(cb: () => void): void;
+      onReplyChunk(cb: (replySoFar: string) => void): void;
+      onError(cb: (msg: string) => void): void;
+      onTranscript(cb: (text: string) => void): void;
+      onVoiceError(cb: (msg: string) => void): void;
+      onWakeMiss(cb: (text: string) => void): void;
+      onTtsChunk(cb: (base64: string) => void): void;
+      onTtsDone(cb: () => void): void;
+    };
+  }
+}
 
 const api = window.zuiti;
 
-const $text = document.getElementById('text');
-const $go = document.getElementById('go');
-const $mic = document.getElementById('mic');
-const $micLabel = $mic.querySelector('.hud__mic-label');
-const $voiceState = document.getElementById('voiceState');
-const $status = document.getElementById('status');
-const $result = document.getElementById('result');
-const $reply = document.getElementById('reply');
-const $candidates = document.getElementById('candidates');
-const $rationale = document.getElementById('rationale');
-const $screenshot = document.getElementById('screenshot');
-const $vadAuto = document.getElementById('vadAuto');
-const $wakeListen = document.getElementById('wakeListen');
+const $text = document.getElementById('text') as HTMLTextAreaElement;
+const $go = document.getElementById('go') as HTMLButtonElement;
+const $mic = document.getElementById('mic') as HTMLButtonElement;
+const $micLabel = $mic.querySelector('.hud__mic-label') as HTMLElement;
+const $voiceState = document.getElementById('voiceState') as HTMLElement;
+const $status = document.getElementById('status') as HTMLElement;
+const $result = document.getElementById('result') as HTMLElement;
+const $reply = document.getElementById('reply') as HTMLElement;
+const $candidates = document.getElementById('candidates') as HTMLElement;
+const $rationale = document.getElementById('rationale') as HTMLElement;
+const $screenshot = document.getElementById('screenshot') as HTMLInputElement;
+const $vadAuto = document.getElementById('vadAuto') as HTMLInputElement;
+const $wakeListen = document.getElementById('wakeListen') as HTMLInputElement;
 
 // TTS 流式播放：用 AudioContext 拼接 pcm16 块，首句先播
-let audioCtx = null;
+let audioCtx: AudioContext | null = null;
 let ttsStartTime = 0;
 
-function ensureAudioCtx() {
+function ensureAudioCtx(): AudioContext {
   if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 24000 });
   return audioCtx;
 }
 
-function runCoach() {
+function runCoach(): void {
   const text = $text.value.trim();
   if (!text) return;
   $go.disabled = true;
@@ -49,17 +75,17 @@ $text.addEventListener('keydown', (e) => {
 });
 
 // ============ 录音（点一下说话 + VAD 自动停 + 按住 fallback） ============
-let mediaRecorder = null;
-let audioChunks = [];
-let micStream = null;
+let mediaRecorder: MediaRecorder | null = null;
+let audioChunks: Blob[] = [];
+let micStream: MediaStream | null = null;
 let recording = false;
-let analyser = null;
-let vad = null;
-let vadTimer = null;
-let vadPendingStart = false; // VAD 触发后真正开始录
-let pressedHoldMode = false; // 按住说话模式（mousedown→mouseup）
+let analyser: AnalyserNode | null = null;
+let vad: VadDetector | null = null;
+let vadTimer: ReturnType<typeof setInterval> | null = null;
+let vadPendingStart = false;
+let pressedHoldMode = false;
 
-function setRecordingState(on) {
+function setRecordingState(on: boolean): void {
   recording = on;
   if (on) {
     $mic.classList.add('hud__mic--recording');
@@ -72,7 +98,7 @@ function setRecordingState(on) {
   }
 }
 
-async function startRecording() {
+async function startRecording(): Promise<void> {
   if (recording) return;
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
@@ -97,11 +123,11 @@ async function startRecording() {
       vadPendingStart = false;
       vad = new VadDetector({
         tickMs: 100,
-        onStateChange: (state, info) => {
+        onStateChange: (state) => {
           if (state === 'speaking' && !vadPendingStart) {
             vadPendingStart = true;
             // 真正开始 MediaRecorder（之前的 buffer 不录，避免环境噪音前导）
-            mediaRecorder.start();
+            mediaRecorder?.start();
             $voiceState.textContent = '在说…说完自动停';
           } else if (state === 'silence' && vadPendingStart && recording) {
             // 说话结束 → 停录音
@@ -111,7 +137,7 @@ async function startRecording() {
         },
       });
       vadTimer = setInterval(() => {
-        if (!analyser) return;
+        if (!analyser || !vad) return;
         vad.feed(computeRms(analyser));
       }, 100);
     } else {
@@ -120,11 +146,11 @@ async function startRecording() {
     }
   } catch (err) {
     $voiceState.hidden = false;
-    $voiceState.textContent = '麦克风不可用：' + (err && err.message ? err.message : String(err));
+    $voiceState.textContent = '麦克风不可用：' + (err instanceof Error ? err.message : String(err));
   }
 }
 
-function stopRecording(autoMode = false) {
+function stopRecording(autoMode = false): void {
   if (!recording) return;
   // 清 VAD timer
   if (vadTimer) {
@@ -146,11 +172,10 @@ function stopRecording(autoMode = false) {
     micStream = null;
   }
   setRecordingState(false);
-  // 按住模式：松手立刻送 ASR；VAD 模式：stopRecording 已被 onStateChange 调用，不再额外动作
   void autoMode;
 }
 
-async function handleRecordingStop() {
+async function handleRecordingStop(): Promise<void> {
   if (audioChunks.length === 0) {
     $voiceState.hidden = true;
     return;
@@ -165,75 +190,35 @@ async function handleRecordingStop() {
     const audioBuf = await tmpCtx.decodeAudioData(arrayBuf);
     tmpCtx.close();
     // AudioBuffer → WAV (pcm16)
-    const wavBytes = encodeWav(audioBuf);
-    const base64 = bytesToBase64(wavBytes);
+    const samples = audioBuf.getChannelData(0);
+    const wavBuf = encodeWav(samples, audioBuf.sampleRate);
+    const base64 = bytesToBase64(new Uint8Array(wavBuf));
     api.sendRecordedAudio('data:audio/wav;base64,' + base64);
   } catch (err) {
-    $voiceState.textContent = '音频处理失败：' + (err && err.message ? err.message : String(err));
+    $voiceState.textContent = '音频处理失败：' + (err instanceof Error ? err.message : String(err));
   }
 }
 
-/** AudioBuffer → pcm16 WAV bytes（单声道，原采样率）。 */
-function encodeWav(audioBuf) {
-  const numChannels = 1;
-  const sampleRate = audioBuf.sampleRate;
-  const numSamples = audioBuf.length;
-  const bytesPerSample = 2;
-  const dataSize = numSamples * numChannels * bytesPerSample;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
-  view.setUint16(32, numChannels * bytesPerSample, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, dataSize, true);
-
-  const channelData = audioBuf.getChannelData(0);
-  let offset = 44;
-  for (let i = 0; i < numSamples; i++) {
-    const s = Math.max(-1, Math.min(1, channelData[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    offset += 2;
-  }
-  return new Uint8Array(buffer);
-}
-
-function writeString(view, offset, str) {
-  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-}
-
-function bytesToBase64(bytes) {
+function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
   }
   return btoa(binary);
 }
 
 // 点击 mic 按钮：VAD 模式 = 切换开/关；按住模式 = mousedown 开 / mouseup 停
-// 但二者都用 click 事件简化：click 时如果没在录，开录；如果在录，停
-// 按住 fallback：用 mousedown/touchstart 时按住说话
 $mic.addEventListener('click', () => {
   if (recording) {
-    // 手动停（用户等不及 VAD）
     stopRecording(false);
   } else {
-    startRecording();
+    void startRecording();
   }
 });
 
 // 按住 fallback（VAD 关闭时启用）：mousedown 开 / mouseup 停
-function shouldUseHoldMode() {
+function shouldUseHoldMode(): boolean {
   return !$vadAuto.checked;
 }
 
@@ -241,16 +226,16 @@ $mic.addEventListener('mousedown', (e) => {
   if (!shouldUseHoldMode() || recording) return;
   e.preventDefault();
   pressedHoldMode = true;
-  startRecording();
+  void startRecording();
 });
 $mic.addEventListener('touchstart', (e) => {
   if (!shouldUseHoldMode() || recording) return;
   e.preventDefault();
   pressedHoldMode = true;
-  startRecording();
+  void startRecording();
 }, { passive: false });
 
-function endHold(e) {
+function endHold(e: Event): void {
   if (!pressedHoldMode) return;
   e.preventDefault();
   pressedHoldMode = false;
@@ -275,7 +260,6 @@ api.onLoading(() => {
 
 // 流式 reply 蹦字：边生成边显示，不等整段 JSON 收完
 api.onReplyChunk((replySoFar) => {
-  // 第一次收到 chunk 时，先显示卡片框架（loading 状态）
   if ($result.hidden) {
     $status.hidden = true;
     $result.hidden = false;
@@ -300,9 +284,9 @@ api.onResult((dto) => {
       '<div class="card__chip"></div>' +
       '<p class="card__text"></p>' +
       '<button class="card__copy">复制</button>';
-    card.querySelector('.card__chip').textContent = c.style || '备选';
-    card.querySelector('.card__text').textContent = c.text;
-    bindCopy(card.querySelector('.card__copy'), c.text);
+    (card.querySelector('.card__chip') as HTMLElement).textContent = c.style || '备选';
+    (card.querySelector('.card__text') as HTMLElement).textContent = c.text;
+    bindCopy(card.querySelector('.card__copy') as HTMLButtonElement, c.text);
     $candidates.appendChild(card);
   }
   $rationale.textContent = dto.rationale || '';
@@ -354,16 +338,15 @@ api.onTtsDone(() => {
 // ============ 耳听八方（持续监听 Jarvis） ============
 // 状态机：off → listening → waked（命中）→ processing → listening
 // listening：持续开麦 + VAD 录到一段 → sendWakeAudio → 等 voice:wakeMiss / voice:transcript
-// waked/processing：主进程已自动跑 coach，渲染层只显示
-let wakeStream = null;
-let wakeAnalyser = null;
-let wakeVad = null;
-let wakeTimer = null;
-let wakeMediaRecorder = null;
-let wakeChunks = [];
+let wakeStream: MediaStream | null = null;
+let wakeAnalyser: AnalyserNode | null = null;
+let wakeVad: VadDetector | null = null;
+let wakeTimer: ReturnType<typeof setInterval> | null = null;
+let wakeMediaRecorder: MediaRecorder | null = null;
+let wakeChunks: Blob[] = [];
 let wakeListening = false;
 
-async function startWakeListening() {
+async function startWakeListening(): Promise<void> {
   if (wakeListening) return;
   try {
     wakeStream = await navigator.mediaDevices.getUserMedia({
@@ -385,9 +368,8 @@ async function startWakeListening() {
       silenceMs: 1000,
       onStateChange: (state) => {
         if (state === 'speaking' && !wakeMediaRecorder) {
-          // 开始录这一段
           wakeChunks = [];
-          wakeMediaRecorder = new MediaRecorder(wakeStream);
+          wakeMediaRecorder = new MediaRecorder(wakeStream!);
           wakeMediaRecorder.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) wakeChunks.push(e.data);
           };
@@ -405,12 +387,12 @@ async function startWakeListening() {
     }, 100);
   } catch (err) {
     $voiceState.hidden = false;
-    $voiceState.textContent = '麦克风不可用：' + (err && err.message ? err.message : String(err));
+    $voiceState.textContent = '麦克风不可用：' + (err instanceof Error ? err.message : String(err));
     $wakeListen.checked = false;
   }
 }
 
-function stopWakeListening() {
+function stopWakeListening(): void {
   if (!wakeListening) return;
   if (wakeTimer) { clearInterval(wakeTimer); wakeTimer = null; }
   if (wakeMediaRecorder && wakeMediaRecorder.state === 'recording') {
@@ -424,9 +406,8 @@ function stopWakeListening() {
   $voiceState.hidden = true;
 }
 
-async function handleWakeStop() {
+async function handleWakeStop(): Promise<void> {
   if (wakeChunks.length === 0) return;
-  // 临时切状态：识别中
   $voiceState.textContent = '🎧 识别中…';
   try {
     const blob = new Blob(wakeChunks, { type: 'audio/webm' });
@@ -434,12 +415,12 @@ async function handleWakeStop() {
     const tmpCtx = new AudioContext();
     const audioBuf = await tmpCtx.decodeAudioData(arrayBuf);
     tmpCtx.close();
-    const wavBytes = encodeWav(audioBuf);
-    const base64 = bytesToBase64(wavBytes);
+    const samples = audioBuf.getChannelData(0);
+    const wavBuf = encodeWav(samples, audioBuf.sampleRate);
+    const base64 = bytesToBase64(new Uint8Array(wavBuf));
     api.sendWakeAudio('data:audio/wav;base64,' + base64);
-    // 等主进程 voice:wakeMiss 或 voice:transcript
   } catch (err) {
-    $voiceState.textContent = '音频处理失败：' + (err && err.message ? err.message : String(err));
+    $voiceState.textContent = '音频处理失败：' + (err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -452,16 +433,44 @@ $wakeListen.addEventListener('change', () => {
 });
 
 api.onWakeMiss((_text) => {
-  // 未命中 Jarvis，继续监听
   if (wakeListening) {
     $voiceState.textContent = '👂 耳听八方（喊 Jarvis）…';
   }
 });
 
-// onTranscript 已经在前面处理（回填 textarea）；
-// 命中 Jarvis 时主进程会自动跑 coach，渲染层在 onResult 时恢复耳听八方状态显示
+// 被唤起（热键/托盘/唤醒词命中）→ 聚焦输入
+api.onActivate(() => {
+  $text.focus();
+});
 
-function bindCopy(btn, text) {
+// ============ 启动：查能力 + 初始化本地 openWakeWord ============
+void api.capabilities().then(async (caps) => {
+  // openWakeWord 本地唤醒：完全离线、无 Key、不联网
+  if (caps.wake) {
+    try {
+      await initWakeWord(caps.wake, () => {
+        // 命中 "Jarvis" → 通知主进程唤起面板（截屏 + 显示 + 聚焦）
+        api.wake();
+        $voiceState.hidden = false;
+        $voiceState.textContent = '✨ Jarvis 唤醒！';
+      });
+      $voiceState.hidden = false;
+      $voiceState.textContent = '👂 在听 "Jarvis"…（本地离线）';
+      setTimeout(() => { $voiceState.hidden = true; }, 2000);
+    } catch (err) {
+      console.error('Wake word init failed:', err);
+      $voiceState.hidden = false;
+      $voiceState.textContent = '唤醒词初始化失败：' + (err instanceof Error ? err.message : String(err));
+    }
+  } else {
+    // 模型缺失：默认隐藏耳听八方选项，提示用户跑 fetch-models
+    $wakeListen.disabled = true;
+    const label = $wakeListen.closest('label');
+    if (label) label.title = '未启用：运行 npm run fetch-models 下载 openWakeWord 模型';
+  }
+});
+
+function bindCopy(btn: HTMLButtonElement, text: string): void {
   btn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(text);

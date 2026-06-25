@@ -33,7 +33,8 @@ export function createHudWindow(): BrowserWindow {
     },
   });
 
-  win.loadFile(join(__dirname, '../../src/renderer/hud.html'));
+  // esbuild 把 hud.ts 打包到 dist/renderer/hud.js，copy-assets 把 hud.html/css + onnx wasm 拷过去
+  win.loadFile(join(__dirname, '..', 'renderer', 'hud.html'));
 
   // 失焦自动隐藏（用完即隐）
   win.on('blur', () => {

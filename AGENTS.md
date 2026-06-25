@@ -47,7 +47,9 @@ TRAE AI 创造力大赛参赛作品，主赛道：生活娱乐。
 ## 技术栈
 
 TypeScript (ESM) · Node ≥ 22 · Electron 42 · `@openai/agents`（非已弃用的 openai-agents-js）· zod v4 · dotenv · node:test
-不引入新依赖。
+渲染层唤醒词：`onnxruntime-web` + `@picovoice/web-voice-processor`（本地离线 openWakeWord，Plan 4 引入）。
+构建：`esbuild` 打包渲染层（Plan 4 引入，解决 ONNX/wasm 资源拷贝）。
+新依赖需经 Plan 评审后引入，并在 [docs/exec-plans/tech-debt-tracker.md](./docs/exec-plans/tech-debt-tracker.md) 登记。
 
 ## Provider 配置
 
