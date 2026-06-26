@@ -17,6 +17,8 @@ import { dirname, resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import OpenAI from 'openai';
 import { setDefaultOpenAIClient, setOpenAIAPI } from '@openai/agents';
+import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import { buildMiraModel } from './mira-model.js';
 
 // 模块导入即加载 .env：保证 getCoachModelName() 在 Agent 构造时（导入期）能读到 env。
 // dotenv.config() 幂等，重复调用无副作用。
@@ -92,4 +94,25 @@ export function initProvider(): void {
   } else {
     setDefaultOpenAIClient(new OpenAI({ apiKey }) as never);
   }
+}
+
+/**
+ * Plan 8：构造关 thinking 的 MiMo session 底座（pi）：authStorage + modelRegistry + 解析出的 model。
+ * 复用 resolveLlmConfig（config.json > env）。createMiraSession 用它。
+ */
+export function createMiraModelRegistry() {
+  const { apiKey, baseURL, model } = resolveLlmConfig();
+  if (!apiKey || !baseURL) throw new Error('缺少 LLM_API_KEY / LLM_BASE_URL');
+  const authStorage = AuthStorage.inMemory();
+  const modelRegistry = ModelRegistry.inMemory(authStorage);
+  modelRegistry.registerProvider('mimo', {
+    name: 'MiMo',
+    baseUrl: baseURL,
+    apiKey,
+    api: 'openai-completions',
+    models: [buildMiraModel(baseURL, model)],
+  });
+  const resolved = modelRegistry.find('mimo', model);
+  if (!resolved) throw new Error(`MiMo model ${model} 注册失败`);
+  return { authStorage, modelRegistry, model: resolved };
 }

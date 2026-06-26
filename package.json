@@ -22,6 +22,8 @@
     "push": "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git push \"$@\""
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.80.2",
+    "@earendil-works/pi-coding-agent": "0.80.2",
     "@openai/agents": "^0.12.0",
     "@picovoice/web-voice-processor": "^4.0.10",
     "dotenv": "^16.4.5",
