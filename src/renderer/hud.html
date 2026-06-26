@@ -32,24 +32,12 @@
 
     <section id="status" class="hud__status" hidden></section>
 
-    <section id="result" class="hud__result" hidden>
-      <article class="card card--reply">
-        <div class="card__chip">嘴替推荐</div>
-        <p id="reply" class="card__text"></p>
-        <button class="card__copy" data-target="reply">复制</button>
-      </article>
-      <div id="candidates" class="hud__candidates"></div>
-      <p id="rationale" class="hud__rationale"></p>
-    </section>
-
-    <!-- Plan 6: explain/summarize 阅读视图 -->
-    <section id="readingView" class="hud__reading" hidden>
-      <article class="card card--reading">
-        <div class="card__chip card__chip--reading">看屏讲解</div>
-        <h3 id="readingTitle" class="card__reading-title"></h3>
-        <p id="readingContent" class="card__reading-content"></p>
-        <ul id="readingBullets" class="card__reading-bullets"></ul>
-      </article>
+    <!-- Plan 8: 通用输出视图（字段驱动：title? + primary + items + note?） -->
+    <section id="output" class="hud__result" hidden>
+      <h3 id="outTitle" class="hud__out-title" hidden></h3>
+      <p id="outPrimary" class="hud__out-primary"></p>
+      <div id="outItems" class="hud__candidates"></div>
+      <p id="outNote" class="hud__rationale" hidden></p>
     </section>
   </div>
 

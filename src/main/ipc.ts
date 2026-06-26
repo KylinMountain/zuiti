@@ -13,7 +13,6 @@
  * IPC 编排（send/chunk/TTS）+ 截屏 + 错误回送。
  */
 import { ipcMain, type BrowserWindow } from 'electron';
-import { initProvider } from '../core/provider.js';
 import { log } from '../core/log.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
@@ -26,14 +25,6 @@ import { CHANNELS, type Capabilities, type WakeRuntime } from '../shared/ipc.js'
  * @param wake 唤醒词运行时（null 时功能关闭，渲染层不启动 openWakeWord）。
  */
 export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): void {
-  let inited = false;
-  const ensureInit = (): void => {
-    if (!inited) {
-      initProvider();
-      inited = true;
-    }
-  };
-
   /** 渲染层启动时查询能力：asr/tts 是否可用 + wake 运行时（含模型 base64）。 */
   ipcMain.handle(CHANNELS.capabilities, async (): Promise<Capabilities> => ({
     asr: true,
@@ -93,13 +84,11 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
 
   // 注意：preload 用 ipcRenderer.send（fire-and-forget），主进程用 ipcMain.on。
   ipcMain.on(CHANNELS.coachRun, (_e, text: string, withScreenshot = false) => {
-    ensureInit();
     void runSkillPipeline(text, withScreenshot);
   });
 
   /** voice:recorded → ASR → voice:transcript → 自动 skill 流水线（点一下说话模式）。 */
   ipcMain.on(CHANNELS.voiceRecorded, (_e, base64DataUrl: string) => {
-    ensureInit();
     log.info('voice.recorded', { bytes: base64DataUrl.length });
 
     void (async () => {
@@ -129,7 +118,6 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
    * - 未命中：voice:wakeMiss（渲染层继续监听）。
    */
   ipcMain.on(CHANNELS.voiceWakeCheck, (_e, base64DataUrl: string) => {
-    ensureInit();
     log.info('voice.wakeCheck', { bytes: base64DataUrl.length });
 
     void (async () => {

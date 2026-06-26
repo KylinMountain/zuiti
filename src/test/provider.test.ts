@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveLlmConfig, getCoachModelName } from '../core/provider.js';
+import { resolveLlmConfig } from '../core/provider.js';
 
 test('resolveLlmConfig: 读 env（LLM_API_KEY/LLM_BASE_URL/LLM_MODEL）', () => {
   process.env.LLM_API_KEY = 'test-key';
@@ -38,10 +38,10 @@ test('resolveLlmConfig: 无 env 时回退默认 model', () => {
   }
 });
 
-test('getCoachModelName: 跟随 LLM_MODEL env', () => {
+test('resolveLlmConfig: 跟随 LLM_MODEL env', () => {
   process.env.LLM_MODEL = 'mimo-v2.5-pro';
   try {
-    assert.equal(getCoachModelName(), 'mimo-v2.5-pro');
+    assert.equal(resolveLlmConfig().model, 'mimo-v2.5-pro');
   } finally {
     delete process.env.LLM_MODEL;
   }

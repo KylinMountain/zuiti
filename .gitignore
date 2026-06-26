@@ -36,3 +36,6 @@ coverage/
 
 # Internal docs (design/competition/plans — 参赛期间不公开)
 docs/
+
+# Plan 8 spike 临时产物
+scripts/.pi-spike-work/
