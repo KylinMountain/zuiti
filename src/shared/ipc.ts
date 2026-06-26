@@ -5,6 +5,26 @@
  * CoachOutputDTO 与 src/modules/reply/schema.ts 的 CoachOutput 结构对齐。
  */
 
+/** Plan 8 通用输出条目：候选/要点/行动项统一形状。 */
+export interface UniversalItem {
+  text: string;
+  /** 风格标签 / 分类（如 "更撩" / "待办"）。 */
+  label?: string;
+  /** true 则渲染「复制」按钮（reply 候选用）。 */
+  copyable?: boolean;
+}
+
+/** Plan 8 通用 skill 输出（替代 SkillOutput 联合类型）。primary 走文本流式，items 走 emit_result。 */
+export interface UniversalOutput {
+  /** best-effort：agent read 的 skill（拿不到留空，渲染/逻辑都不依赖）。 */
+  skillId?: string;
+  title?: string;
+  /** 主体：推荐回复 / 讲解正文（来自文本流式累积）。 */
+  primary: { text: string };
+  items: UniversalItem[];
+  note?: string;
+}
+
 export interface CoachOutputDTO {
   reply: string;
   candidates: { text: string; style: string }[];
