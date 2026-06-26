@@ -2,7 +2,7 @@
  * 跨进程类型（主进程 ↔ 渲染层）。
  *
  * 零运行时依赖（不 import zod / agents / node），同时被渲染层（DOM lib、无 node）和主进程编译。
- * CoachOutputDTO 与 src/modules/reply/schema.ts 的 CoachOutput 结构对齐。
+ * Plan 8：统一为 UniversalOutput（primary + items），渲染层字段驱动。
  */
 
 /** Plan 8 通用输出条目：候选/要点/行动项统一形状。 */
@@ -24,42 +24,6 @@ export interface UniversalOutput {
   items: UniversalItem[];
   note?: string;
 }
-
-export interface CoachOutputDTO {
-  reply: string;
-  candidates: { text: string; style: string }[];
-  rationale: string;
-}
-
-/** Plan 6: skill 联合类型 —— 支持 reply / explain / summarize 三种输出形状。 */
-
-/** skill id 联合类型（router 路由结果 + SkillOutput 判别字段）。 */
-export type SkillId = 'reply' | 'explain' | 'summarize';
-
-/** explain skill 输出：看屏讲解（标题 + 正文 + 可选要点）。 */
-export interface ExplainOutputDTO {
-  title: string;
-  content: string;
-  bullets?: string[];
-}
-
-/** summarize skill 输出：讨论总结（标题 + 要点 + 可选行动项）。 */
-export interface SummarizeOutputDTO {
-  title: string;
-  keyPoints: string[];
-  actionItems?: string[];
-}
-
-/**
- * skill 输出联合类型（判别字段 skillId）。
- * - reply: 卡片复制视图（reply 第一键，流式蹦字）
- * - explain: 阅读视图（一次性显示）
- * - summarize: 要点视图（一次性显示）
- */
-export type SkillOutput =
-  | ({ skillId: 'reply' } & CoachOutputDTO)
-  | ({ skillId: 'explain' } & ExplainOutputDTO)
-  | ({ skillId: 'summarize' } & SummarizeOutputDTO);
 
 /** IPC 通道名常量（避免主进程/preload/渲染层三处拼字符串错位）。 */
 export const CHANNELS = {

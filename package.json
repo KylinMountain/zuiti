@@ -15,7 +15,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "test": "npm run build:node && node --test \"dist/test/*.test.js\"",
     "test:e2e": "npm run build:node && E2E_SKIP=0 node --test \"dist/test/e2e/*.test.js\"",
-    "coach": "npm run build:node && node dist/cli/coach.js",
     "fetch-models": "node scripts/fetch-wake-models.mjs",
     "start": "npm run build && electron .",
     "dev": "npm run build && electron . --enable-logging",
@@ -24,7 +23,6 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.80.2",
     "@earendil-works/pi-coding-agent": "0.80.2",
-    "@openai/agents": "^0.12.0",
     "@picovoice/web-voice-processor": "^4.0.10",
     "dotenv": "^16.4.5",
     "onnxruntime-web": "^1.27.0",

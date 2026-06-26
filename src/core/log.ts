@@ -11,7 +11,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { SkillId } from '../shared/ipc.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -37,19 +36,12 @@ export interface RunSummary {
   runId: string;
   /** ISO timestamp。 */
   ts: string;
-  /** 跑的哪个 skill。 */
-  skillId: SkillId;
+  /** 跑的哪个 skill（agent read 的；拿不到为 'unknown'）。 */
+  skillId: string;
   /** 用户输入长度。 */
   inputLen: number;
-  /** 输出形状摘要（不含敏感内容，只记长度和数量）。 */
-  outputShape: {
-    replyLen?: number;
-    candidatesCount?: number;
-    contentLen?: number;
-    bulletsCount?: number;
-    keyPointsCount?: number;
-    actionItemsCount?: number;
-  };
+  /** 输出形状摘要（不含敏感内容，只记长度和数量；如 primaryLen/itemsCount）。 */
+  outputShape: Record<string, number>;
   /** 端到端耗时（毫秒）。 */
   latencyMs: number;
   /** 模型原始输出长度。 */

@@ -15,8 +15,6 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
-import OpenAI from 'openai';
-import { setDefaultOpenAIClient, setOpenAIAPI } from '@openai/agents';
 import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { buildMiraModel } from './mira-model.js';
 
@@ -53,11 +51,6 @@ export function loadProviderConfig(): ProviderConfig {
   return {};
 }
 
-/** 嘴替的 model_settings：强制 JSON 输出（providerData.json_object）。 */
-export const coachModelSettings = {
-  providerData: { json_object: {} },
-};
-
 /** 解析后的有效 LLM 配置（config.json > env > 默认）。 */
 export interface ResolvedLlmConfig {
   apiKey?: string;
@@ -72,28 +65,6 @@ export function resolveLlmConfig(): ResolvedLlmConfig {
   const baseURL = cfg.baseURL ?? process.env.LLM_BASE_URL;
   const model = cfg.model ?? process.env.LLM_MODEL ?? DEFAULT_MODEL;
   return { apiKey, baseURL, model };
-}
-
-/** 模型名（config.json > LLM_MODEL env > 默认）。 */
-export function getCoachModelName(): string {
-  return resolveLlmConfig().model;
-}
-
-/**
- * 在 loadDotenv 之后调用：用 env/config 构造 OpenAI client 并设为默认。
- * 无 apiKey 时为 no-op（让 SDK 用默认 client）。
- */
-export function initProvider(): void {
-  const { apiKey, baseURL } = resolveLlmConfig();
-  if (!apiKey) return;
-  if (baseURL) {
-    // MiMo 等 OpenAI 兼容端点走 chat_completions
-    setOpenAIAPI('chat_completions');
-    // openai 包 CJS/ESM 双解析下 #private 字段类型不一致，运行时同一实例，强转绕过 TS 报错。
-    setDefaultOpenAIClient(new OpenAI({ baseURL, apiKey }) as never);
-  } else {
-    setDefaultOpenAIClient(new OpenAI({ apiKey }) as never);
-  }
 }
 
 /**
