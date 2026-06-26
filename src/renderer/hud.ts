@@ -256,7 +256,7 @@ $mic.addEventListener('touchcancel', endHold);
 
 api.onLoading(() => {
   $status.hidden = false;
-  $result.hidden = true;
+  $output.hidden = true;
 });
 
 // 流式 reply 蹦字：边生成边显示，不等整段 JSON 收完（只对 reply skill 触发）
