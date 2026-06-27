@@ -137,8 +137,8 @@ export class MiraConversation {
     if (ttsStarted && primary.length > ttsStartedLen) {
       const remaining = primary.slice(ttsStartedLen).trim();
       if (remaining) callbacks?.onTtsStart?.(remaining);
-    } else if (!ttsStarted && primary) {
-      callbacks?.onTtsStart?.(primary);
+    } else if (!ttsStarted && primary.trim()) {
+      callbacks?.onTtsStart?.(primary.trim());
     }
 
     const output: UniversalOutput = {
@@ -169,5 +169,6 @@ export class MiraConversation {
     this.getEmit = null;
     this.resetEmit = null;
     this.multimodal = false;
+    this.turnCount = 0;
   }
 }
