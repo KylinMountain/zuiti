@@ -105,6 +105,7 @@ const $screenshot = document.getElementById('screenshot') as HTMLInputElement;
 const $avatar = document.getElementById('avatar') as HTMLElement;
 const $moodText = document.getElementById('moodText') as HTMLElement;
 const $wave = document.getElementById('wave') as HTMLElement;
+const $topbar = document.querySelector('.topbar') as HTMLElement | null;
 
 const avatarFace = $avatar.querySelector('.avatar') as HTMLElement;
 
@@ -228,6 +229,10 @@ function setHeaderState(s: ConvState): void {
   };
   setMood(moods[s]);
   setAvatarState(s === 'thinking' ? 'thinking' : s === 'speaking' ? 'talking' : s === 'listening' ? 'talking' : 'idle');
+  if ($topbar) {
+    $topbar.classList.remove('topbar--listening', 'topbar--thinking', 'topbar--speaking');
+    if (s !== 'idle') $topbar.classList.add(`topbar--${s}`);
+  }
 }
 
 /** 应用一个事件：算下一状态 → 执行副作用。集中所有麦/计时/唤醒词开关。 */
