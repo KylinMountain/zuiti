@@ -17,8 +17,7 @@ import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { log, type LogLevel } from '../core/log.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
-import { containsWakeWord } from '../core/wakeword.js';
-import { runSkill } from '../modules/skill-runner.js';
+import { MiraConversation } from '../modules/mira/conversation.js';
 import { join } from 'node:path';
 import { CHANNELS, type Capabilities, type WakeRuntime, type ReplyStyle } from '../shared/ipc.js';
 
@@ -26,7 +25,7 @@ import { CHANNELS, type Capabilities, type WakeRuntime, type ReplyStyle } from '
  * 注册 coach + voice + capabilities IPC handlers。主进程启动时调用一次。
  * @param wake 唤醒词运行时（null 时功能关闭，渲染层不启动 openWakeWord）。
  */
-export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): void {
+export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): { endConversation: () => void } {
   /** 渲染层启动时查询能力：asr/tts 是否可用 + wake 运行时（含模型 base64）。 */
   ipcMain.handle(CHANNELS.capabilities, async (): Promise<Capabilities> => ({
     asr: true,
@@ -41,6 +40,18 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
       : 'info';
     log[lv]('renderer:' + msg, extra);
   });
+
+  /** 本次对话的保活会话（多轮记忆）。conversationReset / panelHide 时 dispose。 */
+  let conversation: MiraConversation | null = null;
+  function getConversation(): MiraConversation {
+    if (!conversation) conversation = new MiraConversation();
+    return conversation;
+  }
+  function endConversation(): void {
+    conversation?.dispose();
+    conversation = null;
+    log.info('conversation.ended');
+  }
 
   // ---- History helpers (used by runSkillPipeline below) ----
   const historyPath = join(app.getPath('userData'), 'zuiti-history.json');
@@ -86,7 +97,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     }
 
     try {
-      const { output, summary } = await runSkill(text, screenshotDataUrl, {
+      const { output, summary } = await getConversation().sendTurn(text, screenshotDataUrl, {
         onReplyChunk: (reply) => mainWindow.webContents.send(CHANNELS.coachReplyChunk, reply),
         onTtsStart: (firstSentence) => startTtsStream(firstSentence, mainWindow),
         style,
@@ -175,38 +186,8 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     })();
   });
 
-  /**
-   * voice:wakeCheck → ASR → containsWakeWord 判定。
-   * - 命中：voice:transcript 回填 + 自动跑 skill 流水线（带截图）。
-   * - 未命中：voice:wakeMiss（渲染层继续监听）。
-   */
-  ipcMain.on(CHANNELS.voiceWakeCheck, (_e, base64DataUrl: string) => {
-    log.info('voice.wakeCheck', { bytes: base64DataUrl.length });
-
-    void (async () => {
-      try {
-        const { mime, bytes } = parseDataUrl(base64DataUrl);
-        const audioMime = mimeToAudioMime(mime);
-        const text = (await transcribeAudio(bytes, audioMime, 'auto')).trim();
-        log.info('voice.wakeCheck.asr', { textLen: text.length, hit: containsWakeWord(text) });
-
-        if (!text) {
-          mainWindow.webContents.send(CHANNELS.voiceWakeMiss, '');
-          return;
-        }
-        if (!containsWakeWord(text)) {
-          mainWindow.webContents.send(CHANNELS.voiceWakeMiss, text);
-          return;
-        }
-        // 命中唤醒词：整段当命令，回填 + 自动跑 skill（带截图，唤醒后看屏）
-        mainWindow.webContents.send(CHANNELS.voiceTranscript, text);
-        await runSkillPipeline(text, true);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        mainWindow.webContents.send(CHANNELS.voiceError, msg);
-        log.error('voice.wakeCheck.error', { msg });
-      }
-    })();
+  ipcMain.on(CHANNELS.conversationReset, () => {
+    endConversation();
   });
 
   // ---- History IPC ----
@@ -246,4 +227,6 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
       log.error('settings.save.failed', { msg: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  return { endConversation };
 }

@@ -25,10 +25,6 @@ const api = {
   sendRecordedAudio: (base64DataUrl: string, withScreenshot = false, style?: ReplyStyle): void => {
     ipcRenderer.send(CHANNELS.voiceRecorded, base64DataUrl, withScreenshot, style);
   },
-  /** 耳听八方模式：发送音频给主进程做唤醒词判定（含 Jarvis 才跑 coach）。 */
-  sendWakeAudio: (base64DataUrl: string): void => {
-    ipcRenderer.send(CHANNELS.voiceWakeCheck, base64DataUrl);
-  },
   /** 监听被唤起（热键/托盘/唤醒词命中后），聚焦输入框。 */
   onActivate: (cb: () => void): void => {
     ipcRenderer.on(CHANNELS.onActivate, () => cb());
@@ -61,9 +57,17 @@ const api = {
   onVoiceError: (cb: (msg: string) => void): void => {
     ipcRenderer.on(CHANNELS.voiceError, (_e, msg: string) => cb(msg));
   },
-  /** 监听唤醒未命中（耳听八方模式继续监听）。text 是 ASR 结果（可能为空）。 */
-  onWakeMiss: (cb: (text: string) => void): void => {
-    ipcRenderer.on(CHANNELS.voiceWakeMiss, (_e, text: string) => cb(text));
+  /** 收起面板（隐藏窗口 + 结束本次对话）。 */
+  hidePanel: (): void => {
+    ipcRenderer.send(CHANNELS.panelHide);
+  },
+  /** 新对话：dispose 主进程保活 session。 */
+  resetConversation: (): void => {
+    ipcRenderer.send(CHANNELS.conversationReset);
+  },
+  /** 监听面板被收起/隐藏，复位渲染层状态机。 */
+  onDeactivate: (cb: () => void): void => {
+    ipcRenderer.on(CHANNELS.onDeactivate, () => cb());
   },
   /** 监听 TTS 音频块（base64 pcm16），首句先播。 */
   onTtsChunk: (cb: (base64: string) => void): void => {

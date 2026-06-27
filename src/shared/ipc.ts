@@ -41,12 +41,8 @@ export const CHANNELS = {
   coachError: 'coach:error',
   /** 渲染 → 主：发送录音做 ASR（base64 data URL）。 */
   voiceRecorded: 'voice:recorded',
-  /** 渲染 → 主：耳听八方模式，发送音频做唤醒词判定（base64 data URL）。 */
-  voiceWakeCheck: 'voice:wakeCheck',
   /** 主 → 渲染：ASR 转写结果回填。 */
   voiceTranscript: 'voice:transcript',
-  /** 主 → 渲染：唤醒未命中（耳听八方继续监听）。 */
-  voiceWakeMiss: 'voice:wakeMiss',
   /** 主 → 渲染：TTS 音频块（base64 pcm16）。 */
   voiceTtsChunk: 'voice:ttsChunk',
   /** 主 → 渲染：TTS 完成。 */
@@ -57,6 +53,12 @@ export const CHANNELS = {
   wake: 'wake:trigger',
   /** 主 → 渲染：被热键/托盘/唤醒词唤起，聚焦输入框。 */
   onActivate: 'panel:activate',
+  /** 主 → 渲染：面板被收起/隐藏，渲染层复位状态机（停麦、回 idle）。 */
+  onDeactivate: 'panel:deactivate',
+  /** 渲染 → 主：收起面板（隐藏窗口 + 结束本次对话）。 */
+  panelHide: 'panel:hide',
+  /** 渲染 → 主：新对话（dispose 保活 session，对话流清空在渲染层）。 */
+  conversationReset: 'conversation:reset',
   /** 渲染 → 主：查询能力（asr/tts/wake 是否可用 + wake 运行时）。 */
   capabilities: 'app:capabilities',
   /** 渲染 → 主：渲染层日志转发（level, msg, extra）。 */
