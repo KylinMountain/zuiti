@@ -17,9 +17,10 @@ import { MIRA_SYSTEM_PROMPT, skillsDir } from './prompt.js';
 export async function createMiraSession(hasScreenshot = false): Promise<{
   session: Awaited<ReturnType<typeof createAgentSession>>['session'];
   getEmit: () => EmitResult | null;
+  resetEmit: () => void;
 }> {
   const { authStorage, modelRegistry, model } = createMiraModelRegistry(hasScreenshot);
-  const { tool: emitTool, getResult } = createEmitTool();
+  const { tool: emitTool, getResult, reset: resetEmit } = createEmitTool();
 
   const skills = skillsDir();
   const cwd = join(skills, '..'); // 仓库根
@@ -47,5 +48,5 @@ export async function createMiraSession(hasScreenshot = false): Promise<{
     sessionManager: SessionManager.inMemory(cwd),
     cwd,
   });
-  return { session, getEmit: getResult };
+  return { session, getEmit: getResult, resetEmit };
 }
