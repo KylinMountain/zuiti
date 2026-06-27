@@ -4,7 +4,7 @@
  * 渲染层只能通过 window.zuiti 调用，无法直接访问 Node / Electron。
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import { CHANNELS, type Capabilities, type UniversalOutput } from '../shared/ipc.js';
+import { CHANNELS, type Capabilities, type UniversalOutput, type ReplyStyle } from '../shared/ipc.js';
 
 const api = {
   /** 渲染层日志转发到主进程（写入同一个日志文件）。 */
@@ -18,12 +18,12 @@ const api = {
     ipcRenderer.send(CHANNELS.wake);
   },
   /** 触发嘴替（发送用户口述）。withScreenshot=true 时主进程自动截屏看屏。 */
-  runCoach: (text: string, withScreenshot = false): void => {
-    ipcRenderer.send(CHANNELS.coachRun, text, withScreenshot);
+  runCoach: (text: string, withScreenshot = false, style?: ReplyStyle): void => {
+    ipcRenderer.send(CHANNELS.coachRun, text, withScreenshot, style);
   },
   /** 发送录制的音频（base64 data URL）给主进程做 ASR。withScreenshot=true 时自动截屏看屏。 */
-  sendRecordedAudio: (base64DataUrl: string, withScreenshot = false): void => {
-    ipcRenderer.send(CHANNELS.voiceRecorded, base64DataUrl, withScreenshot);
+  sendRecordedAudio: (base64DataUrl: string, withScreenshot = false, style?: ReplyStyle): void => {
+    ipcRenderer.send(CHANNELS.voiceRecorded, base64DataUrl, withScreenshot, style);
   },
   /** 耳听八方模式：发送音频给主进程做唤醒词判定（含 Jarvis 才跑 coach）。 */
   sendWakeAudio: (base64DataUrl: string): void => {
@@ -40,6 +40,10 @@ const api = {
   /** 监听加载中。 */
   onLoading: (cb: () => void): void => {
     ipcRenderer.on(CHANNELS.coachLoading, () => cb());
+  },
+  /** 监听截图预览（主进程截屏后推送 data URL）。 */
+  onScreenshot: (cb: (dataUrl: string) => void): void => {
+    ipcRenderer.on(CHANNELS.coachScreenshot, (_e, dataUrl: string) => cb(dataUrl));
   },
   /** 监听流式 reply 增量（迄今为止已流出的 reply 全文，每次新增都推）。 */
   onReplyChunk: (cb: (replySoFar: string) => void): void => {
@@ -68,6 +72,22 @@ const api = {
   /** 监听 TTS 完成。 */
   onTtsDone: (cb: () => void): void => {
     ipcRenderer.on(CHANNELS.voiceTtsDone, () => cb());
+  },
+  /** 获取最近 N 条历史（默认 20）。 */
+  getHistory: (limit = 20): Promise<unknown[]> => {
+    return ipcRenderer.invoke(CHANNELS.historyList, limit);
+  },
+  /** 清除全部历史。 */
+  clearHistory: (): Promise<void> => {
+    return ipcRenderer.invoke(CHANNELS.historyClear);
+  },
+  /** 读取设置。key 不传返回全部设置。 */
+  getSettings: (key?: string): Promise<Record<string, unknown>> => {
+    return ipcRenderer.invoke(CHANNELS.settingsGet, key);
+  },
+  /** 写入设置（部分更新）。 */
+  saveSettings: (settings: Record<string, unknown>): Promise<void> => {
+    return ipcRenderer.invoke(CHANNELS.settingsSet, settings);
   },
 };
 

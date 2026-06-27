@@ -15,6 +15,7 @@
     <div class="bg__orb bg__orb--pink"></div>
     <div class="bg__orb bg__orb--purple"></div>
     <div class="bg__orb bg__orb--cyan"></div>
+    <canvas id="particles"></canvas>
   </div>
 
   <div class="app">
@@ -47,6 +48,17 @@
           <!-- 光晕 -->
           <div class="avatar__halo"></div>
           <div class="avatar__halo avatar__halo--2"></div>
+          <svg class="avatar__orbit" viewBox="0 0 120 120" fill="none">
+            <circle cx="60" cy="60" r="54" stroke="url(#orbitGrad)" stroke-width="1" stroke-dasharray="8 12" opacity="0.3">
+              <animateTransform attributeName="transform" type="rotate" from="0 60 60" to="360 60 60" dur="20s" repeatCount="indefinite"/>
+            </circle>
+            <defs>
+              <linearGradient id="orbitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#3EEAAA"/>
+                <stop offset="100%" stop-color="transparent"/>
+              </linearGradient>
+            </defs>
+          </svg>
         </div>
       </div>
 
@@ -55,6 +67,12 @@
           <span class="hero__title-main">嘴替</span>
           <span class="hero__title-sub" id="moodText">已就位，等你开麦</span>
         </h1>
+        <div class="hero__status">
+          <span class="status-dot status-dot--idle"></span>
+          <span class="status-dot status-dot--listen"></span>
+          <span class="status-dot status-dot--think"></span>
+          <span class="status-dot status-dot--speak"></span>
+        </div>
       </div>
 
       <!-- 说话波形 -->
@@ -62,7 +80,84 @@
         <span></span><span></span><span></span><span></span><span></span>
         <span></span><span></span><span></span><span></span><span></span>
       </div>
+
+      <!-- Settings toggle -->
+      <button class="settings-btn" id="settingsBtn" type="button" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
+        </svg>
+      </button>
     </header>
+
+    <!-- Settings Panel -->
+    <aside class="settings-panel" id="settingsPanel" hidden>
+      <div class="settings-panel__header">
+        <span class="settings-panel__title">设置</span>
+        <button class="settings-panel__close" id="settingsClose" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="settings-panel__body">
+        <!-- Default Style -->
+        <div class="settings-item">
+          <label class="settings-item__label">默认风格</label>
+          <select class="settings-item__select" id="settingDefaultStyle">
+            <option value="empathy">💕 高情商</option>
+            <option value="roast">🔥 毒舌</option>
+            <option value="formal">👔 正式</option>
+            <option value="casual">😎 随意</option>
+            <option value="english">🌍 英文</option>
+          </select>
+        </div>
+        <!-- TTS Toggle -->
+        <div class="settings-item">
+          <label class="settings-item__label">语音朗读 (TTS)</label>
+          <label class="settings-item__toggle">
+            <input type="checkbox" id="settingTts" checked />
+            <span class="settings-item__toggle-track"></span>
+          </label>
+        </div>
+        <!-- Wake Threshold -->
+        <div class="settings-item">
+          <label class="settings-item__label">唤醒灵敏度</label>
+          <input type="range" class="settings-item__range" id="settingWakeThreshold" min="0" max="100" value="50" />
+        </div>
+        <!-- Provider Info -->
+        <div class="settings-item settings-item--info">
+          <span class="settings-item__label">模型</span>
+          <span class="settings-item__value" id="settingModel">--</span>
+        </div>
+        <!-- Version -->
+        <div class="settings-item settings-item--info">
+          <span class="settings-item__label">版本</span>
+          <span class="settings-item__value">0.1.0</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 历史记录 -->
+    <section class="history-section" id="historySection">
+      <button class="history-toggle" id="historyToggle" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span>历史记录</span>
+        <span class="history-count" id="historyCount"></span>
+        <svg class="history-toggle__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="history-list" id="historyList" hidden></div>
+      <div class="history-empty" id="historyEmpty">
+        <span>暂无记录</span>
+      </div>
+      <button class="history-clear" id="historyClear" type="button" hidden>清除全部</button>
+    </section>
+
+    <!-- 风格切换器 -->
+    <section class="style-bar">
+      <div class="style-bar__pills" id="stylePills"></div>
+    </section>
 
     <!-- 输入区 -->
     <section class="input-zone">
@@ -90,6 +185,22 @@
           </button>
         </div>
       </div>
+
+        <!-- Quick scene shortcuts -->
+        <div class="scene-shortcuts" id="sceneShortcuts">
+          <button class="scene-chip" data-prompt="帮我回这条消息，高情商一点" type="button">
+            <span>💘</span>恋爱救场
+          </button>
+          <button class="scene-chip" data-prompt="帮我怼回去，有理有据但不骂人" type="button">
+            <span>😎</span>机智对线
+          </button>
+          <button class="scene-chip" data-prompt="帮我写一段得体的职场沟通" type="button">
+            <span>💼</span>职场分寸
+          </button>
+          <button class="scene-chip" data-prompt="用流利地道的英文回复" type="button">
+            <span>🌍</span>英文回复
+          </button>
+        </div>
     </section>
 
     <!-- 语音控制 -->
@@ -115,6 +226,12 @@
           <input type="checkbox" id="wakeListen" />
           <span>耳听八方</span>
         </label>
+      </div>
+
+      <!-- Screenshot preview -->
+      <div class="screenshot-preview" id="screenshotPreview" hidden>
+        <img class="screenshot-preview__img" id="screenshotImg" alt="截屏预览" />
+        <span class="screenshot-preview__label">正在分析屏幕…</span>
       </div>
     </section>
 
@@ -159,6 +276,86 @@
       <p id="outNote" class="output__note" hidden></p>
     </section>
   </div>
+
+  <script>
+    /* ── Particle canvas background ── */
+    (function () {
+      'use strict';
+      var canvas = document.getElementById('particles');
+      if (!canvas) return;
+      var ctx = canvas.getContext('2d');
+      var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var PARTICLE_COUNT = 40;
+      var CONNECT_DIST = 100;
+      var particles = [];
+
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resize();
+      window.addEventListener('resize', resize);
+
+      function createParticle() {
+        return {
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          r: 1 + Math.random(),           // 1-2px
+          vx: (Math.random() - 0.5) * 0.3,
+          vy: (Math.random() - 0.5) * 0.3,
+          opacity: 0.15 + Math.random() * 0.25  // 0.15-0.4
+        };
+      }
+
+      for (var i = 0; i < PARTICLE_COUNT; i++) particles.push(createParticle());
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        /* connecting lines */
+        for (var i = 0; i < particles.length; i++) {
+          for (var j = i + 1; j < particles.length; j++) {
+            var dx = particles[i].x - particles[j].x;
+            var dy = particles[i].y - particles[j].y;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < CONNECT_DIST) {
+              ctx.beginPath();
+              ctx.moveTo(particles[i].x, particles[i].y);
+              ctx.lineTo(particles[j].x, particles[j].y);
+              ctx.strokeStyle = 'rgba(62, 234, 170, 0.08)';
+              ctx.lineWidth = 0.5;
+              ctx.stroke();
+            }
+          }
+        }
+
+        /* particles */
+        for (var k = 0; k < particles.length; k++) {
+          var p = particles[k];
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(0.5, p.r), 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(62, 234, 170, ' + p.opacity + ')';
+          ctx.fill();
+
+          /* drift */
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < -10) p.x = canvas.width + 10;
+          if (p.x > canvas.width + 10) p.x = -10;
+          if (p.y < -10) p.y = canvas.height + 10;
+          if (p.y > canvas.height + 10) p.y = -10;
+        }
+
+        if (!reducedMotion) requestAnimationFrame(draw);
+      }
+
+      if (!reducedMotion) {
+        requestAnimationFrame(draw);
+      } else {
+        draw(); // single static frame
+      }
+    })();
+  </script>
 
   <script type="module" src="hud.js"></script>
 </body>

@@ -9,6 +9,7 @@ import { VadDetector, computeRms } from './vad.js';
 import { initWakeWord } from './wakeword.js';
 import { encodeWav } from './wav.js';
 import { buildRenderPlan } from '../shared/render-plan.js';
+import { REPLY_STYLES, DEFAULT_STYLE, type ReplyStyle } from '../shared/ipc.js';
 import type { Capabilities, UniversalOutput, WakeRuntime } from '../shared/ipc.js';
 
 declare global {
@@ -17,12 +18,13 @@ declare global {
       rlog(level: string, msg: string, extra?: Record<string, unknown>): void;
       capabilities(): Promise<Capabilities>;
       wake(): void;
-      runCoach(text: string, withScreenshot?: boolean): void;
-      sendRecordedAudio(base64DataUrl: string, withScreenshot?: boolean): void;
+      runCoach(text: string, withScreenshot?: boolean, style?: string): void;
+      sendRecordedAudio(base64DataUrl: string, withScreenshot?: boolean, style?: string): void;
       sendWakeAudio(base64DataUrl: string): void;
       onActivate(cb: () => void): void;
       onResult(cb: (dto: UniversalOutput) => void): void;
       onLoading(cb: () => void): void;
+      onScreenshot(cb: (dataUrl: string) => void): void;
       onReplyChunk(cb: (replySoFar: string) => void): void;
       onError(cb: (msg: string) => void): void;
       onTranscript(cb: (text: string) => void): void;
@@ -30,11 +32,52 @@ declare global {
       onWakeMiss(cb: (text: string) => void): void;
       onTtsChunk(cb: (base64: string) => void): void;
       onTtsDone(cb: () => void): void;
+      getSettings(key?: string): Promise<Record<string, unknown>>;
+      saveSettings(settings: Record<string, unknown>): Promise<void>;
+      getHistory(limit?: number): Promise<unknown[]>;
+      clearHistory(): Promise<void>;
     };
   }
 }
 
 const api = window.zuiti;
+
+// ============ 风格状态 ============
+let currentStyle: ReplyStyle = DEFAULT_STYLE;
+
+function setCurrentStyle(style: ReplyStyle): void {
+  currentStyle = style;
+  document.querySelectorAll('.style-pill').forEach((el) => {
+    el.classList.toggle('style-pill--active', (el as HTMLElement).dataset.style === style);
+  });
+}
+
+/** 渲染风格切换器按钮（启动时调用一次）。 */
+function initStylePills(): void {
+  const container = document.getElementById('stylePills');
+  if (!container) return;
+  for (const s of REPLY_STYLES) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'style-pill' + (s.id === currentStyle ? ' style-pill--active' : '');
+    btn.dataset.style = s.id;
+    btn.innerHTML = `<span class="style-pill__emoji">${s.emoji}</span>${s.label}`;
+    btn.addEventListener('click', () => setCurrentStyle(s.id));
+    container.appendChild(btn);
+  }
+}
+initStylePills();
+
+// ============ 快捷场景 ============
+document.querySelectorAll('.scene-chip').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const prompt = (btn as HTMLElement).dataset.prompt ?? '';
+    $text.value = prompt;
+    $text.focus();
+    // Select all text so user can easily modify
+    $text.select();
+  });
+});
 
 // ============ 渲染层日志转发 ============
 function rlog(level: string, msg: string, extra?: Record<string, unknown>): void {
@@ -70,6 +113,8 @@ const $wakeListen = document.getElementById('wakeListen') as HTMLInputElement;
 const $avatar = document.getElementById('avatar') as HTMLElement;
 const $moodText = document.getElementById('moodText') as HTMLElement;
 const $wave = document.getElementById('wave') as HTMLElement;
+const $screenshotPreview = document.getElementById('screenshotPreview') as HTMLElement;
+const $screenshotImg = document.getElementById('screenshotImg') as HTMLImageElement;
 
 const avatarFace = $avatar.querySelector('.avatar') as HTMLElement;
 
@@ -112,7 +157,7 @@ function runCoach(): void {
   setAvatarState('thinking');
   setMood('思考中…');
   const withScreenshot = $screenshot && $screenshot.checked;
-  api.runCoach(text, withScreenshot);
+  api.runCoach(text, withScreenshot, currentStyle);
 }
 
 $go.addEventListener('click', runCoach);
@@ -168,6 +213,9 @@ async function startRecording(): Promise<void> {
 
     setRecordingState(true);
 
+    // MediaRecorder 一开始就启动，避免 VAD 检测期间丢失开头音频
+    mediaRecorder.start();
+
     if ($vadAuto.checked) {
       const ac = ensureAudioCtx();
       const source = ac.createMediaStreamSource(micStream);
@@ -181,7 +229,6 @@ async function startRecording(): Promise<void> {
           rlog('debug', 'vad.state', { state, vadPendingStart });
           if (state === 'speaking' && !vadPendingStart) {
             vadPendingStart = true;
-            mediaRecorder?.start();
             rlog('info', 'vad.recording.start');
             $voiceState.textContent = '在说…说完自动停';
           } else if (state === 'silence' && vadPendingStart && recording) {
@@ -196,7 +243,6 @@ async function startRecording(): Promise<void> {
         vad.feed(computeRms(analyser));
       }, 100);
     } else {
-      mediaRecorder.start();
       rlog('info', 'mic.recording.manual');
     }
   } catch (err) {
@@ -245,9 +291,9 @@ async function handleRecordingStop(): Promise<void> {
     if (wakeTriggeredRecording) {
       // 唤醒触发的录音：直接 ASR + 带截图看屏（不走 wakeCheck，用户已唤醒无需再检测）
       wakeTriggeredRecording = false;
-      api.sendRecordedAudio('data:audio/wav;base64,' + base64, true);
+      api.sendRecordedAudio('data:audio/wav;base64,' + base64, true, currentStyle);
     } else {
-      api.sendRecordedAudio('data:audio/wav;base64,' + base64);
+      api.sendRecordedAudio('data:audio/wav;base64,' + base64, false, currentStyle);
     }
   } catch (err) {
     rlog('error', 'mic.decode.failed', { msg: err instanceof Error ? err.message : String(err) });
@@ -310,8 +356,15 @@ $mic.addEventListener('touchcancel', endHold);
 api.onLoading(() => {
   $status.hidden = false;
   $output.hidden = true;
+  $screenshotPreview?.setAttribute('hidden', '');
   setAvatarState('thinking');
   setMood('思考中…');
+});
+
+// Screenshot preview
+api.onScreenshot((dataUrl) => {
+  $screenshotImg.src = dataUrl;
+  $screenshotPreview.hidden = false;
 });
 
 // 流式 reply 蹦字
@@ -345,6 +398,7 @@ api.onResult((dto) => {
   $status.hidden = true;
   $voiceState.hidden = true;
   $go.disabled = false;
+  $screenshotPreview?.setAttribute('hidden', '');
   setAvatarState('idle');
   setMood('搞定，挑一条发！');
 
@@ -645,3 +699,122 @@ function escapeHtml(s: string): string {
 }
 
 $text.focus();
+
+// ============ 设置面板 ============
+const $settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
+const $settingsPanel = document.getElementById('settingsPanel') as HTMLElement;
+const $settingsClose = document.getElementById('settingsClose') as HTMLButtonElement;
+const $settingDefaultStyle = document.getElementById('settingDefaultStyle') as HTMLSelectElement;
+const $settingTts = document.getElementById('settingTts') as HTMLInputElement;
+const $settingWakeThreshold = document.getElementById('settingWakeThreshold') as HTMLInputElement;
+const $settingModel = document.getElementById('settingModel') as HTMLElement;
+
+$settingsBtn?.addEventListener('click', () => {
+  void loadSettings();
+  $settingsPanel.hidden = false;
+});
+
+$settingsClose?.addEventListener('click', () => {
+  $settingsPanel.hidden = true;
+});
+
+$settingDefaultStyle?.addEventListener('change', () => {
+  void saveSetting('defaultStyle', $settingDefaultStyle.value);
+});
+
+$settingTts?.addEventListener('change', () => {
+  void saveSetting('ttsEnabled', $settingTts.checked);
+});
+
+$settingWakeThreshold?.addEventListener('input', () => {
+  void saveSetting('wakeThreshold', Number($settingWakeThreshold.value) / 100);
+});
+
+async function loadSettings(): Promise<void> {
+  try {
+    const settings = await api.getSettings();
+    if (settings.defaultStyle && typeof settings.defaultStyle === 'string') {
+      $settingDefaultStyle.value = settings.defaultStyle;
+      setCurrentStyle(settings.defaultStyle as ReplyStyle);
+    }
+    if (typeof settings.ttsEnabled === 'boolean') {
+      $settingTts.checked = settings.ttsEnabled;
+    }
+    if (typeof settings.wakeThreshold === 'number') {
+      $settingWakeThreshold.value = String(Math.round((settings.wakeThreshold as number) * 100));
+    }
+  } catch (err) {
+    rlog('warn', 'settings.load.failed', { msg: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+async function saveSetting(key: string, value: unknown): Promise<void> {
+  try {
+    await api.saveSettings({ [key]: value });
+  } catch (err) {
+    rlog('warn', 'settings.save.failed', { msg: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+// Load model name display
+void api.capabilities().then(() => {
+  $settingModel.textContent = 'MiMo v2.5';
+}).catch(() => {});
+
+// ============ 历史记录 ============
+const $historyToggle = document.getElementById('historyToggle') as HTMLButtonElement;
+const $historyList = document.getElementById('historyList') as HTMLElement;
+const $historyEmpty = document.getElementById('historyEmpty') as HTMLElement;
+const $historyClear = document.getElementById('historyClear') as HTMLButtonElement;
+const $historyCount = document.getElementById('historyCount') as HTMLElement;
+
+$historyToggle?.addEventListener('click', () => {
+  const expanded = $historyToggle.getAttribute('aria-expanded') === 'true';
+  $historyToggle.setAttribute('aria-expanded', String(!expanded));
+  $historyList.hidden = expanded;
+  $historyEmpty.hidden = expanded;
+  $historyClear.hidden = expanded;
+  if (!expanded) void refreshHistory();
+});
+
+$historyClear?.addEventListener('click', () => {
+  void api.clearHistory().then(() => {
+    $historyList.innerHTML = '';
+    $historyList.hidden = true;
+    $historyEmpty.hidden = false;
+    $historyClear.hidden = true;
+    $historyCount.textContent = '';
+  });
+});
+
+async function refreshHistory(): Promise<void> {
+  try {
+    const entries = await api.getHistory(20) as Array<{
+      id: number; ts: number; input: string; output: string; style?: string;
+    }>;
+    $historyList.innerHTML = '';
+    $historyCount.textContent = entries.length > 0 ? String(entries.length) : '';
+    $historyEmpty.hidden = entries.length > 0;
+    $historyClear.hidden = entries.length === 0;
+    $historyList.hidden = entries.length === 0;
+    for (const entry of entries) {
+      const item = document.createElement('div');
+      item.className = 'history-item';
+      const time = new Date(entry.ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      item.innerHTML = `
+        <span class="history-item__time">${time}</span>
+        <div class="history-item__content">
+          <span class="history-item__input">${escapeHtml(entry.input)}</span>
+          <span class="history-item__output">${escapeHtml(entry.output)}</span>
+        </div>
+      `;
+      item.addEventListener('click', () => {
+        $text.value = entry.input;
+        $text.focus();
+      });
+      $historyList.appendChild(item);
+    }
+  } catch {
+    // Ignore
+  }
+}

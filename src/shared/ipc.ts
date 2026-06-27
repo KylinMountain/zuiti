@@ -35,6 +35,8 @@ export const CHANNELS = {
   coachReplyChunk: 'coach:replyChunk',
   /** 主 → 渲染：coach 完成，附完整结构化结果。 */
   coachResult: 'coach:result',
+  /** 主 → 渲染：推送截图预览（data URL）。 */
+  coachScreenshot: 'coach:screenshot',
   /** 主 → 渲染：coach 出错。 */
   coachError: 'coach:error',
   /** 渲染 → 主：发送录音做 ASR（base64 data URL）。 */
@@ -59,6 +61,14 @@ export const CHANNELS = {
   capabilities: 'app:capabilities',
   /** 渲染 → 主：渲染层日志转发（level, msg, extra）。 */
   rendererLog: 'renderer:log',
+  /** 渲染 → 主：获取历史记录列表（最新 N 条）。 */
+  historyList: 'history:list',
+  /** 渲染 → 主：清除所有历史记录。 */
+  historyClear: 'history:clear',
+  /** 渲染 → 主：读取设置（key 或全部）。 */
+  settingsGet: 'settings:get',
+  /** 渲染 → 主：写入设置。 */
+  settingsSet: 'settings:set',
 } as const;
 
 /** 唤醒词运行所需：openWakeWord 三个模型（base64）+ 阈值，由主进程下发给渲染。 */
@@ -70,6 +80,45 @@ export interface WakeRuntime {
   melModel: string;
   embModel: string;
   wakeModel: string;
+}
+
+/** 用户可配置的设置项。 */
+export interface ZuitiSettings {
+  /** 默认风格 */
+  defaultStyle?: string;
+  /** TTS 是否开启 */
+  ttsEnabled?: boolean;
+  /** 唤醒词阈值 0.0-1.0 */
+  wakeThreshold?: number;
+}
+
+/** 用户可选的风格（影响 LLM 输出语气）。 */
+export type ReplyStyle = 'empathy' | 'roast' | 'formal' | 'casual' | 'english';
+
+/** 默认风格。 */
+export const DEFAULT_STYLE: ReplyStyle = 'empathy';
+
+/** 所有可用风格（UI 按钮按此顺序渲染）。 */
+export const REPLY_STYLES: ReadonlyArray<{ id: ReplyStyle; label: string; emoji: string }> = [
+  { id: 'empathy',  label: '高情商', emoji: '💕' },
+  { id: 'roast',    label: '毒舌',   emoji: '🔥' },
+  { id: 'formal',   label: '正式',   emoji: '👔' },
+  { id: 'casual',   label: '随意',   emoji: '😎' },
+  { id: 'english',  label: '英文',   emoji: '🌍' },
+] as const;
+
+/** 单条历史记录。 */
+export interface HistoryEntry {
+  /** 唯一 ID（时间戳）。 */
+  id: number;
+  /** Unix timestamp (ms). */
+  ts: number;
+  /** 用户输入摘要。 */
+  input: string;
+  /** 嘴替主回复摘要。 */
+  output: string;
+  /** 使用的风格。 */
+  style?: string;
 }
 
 /** 供 UI 决定显示哪些控件 + 是否启动本地唤醒词监听。 */

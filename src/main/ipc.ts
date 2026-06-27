@@ -12,13 +12,15 @@
  * Plan 7: 核心逻辑抽到 modules/skill-runner.ts（不依赖 BrowserWindow），本文件只负责
  * IPC 编排（send/chunk/TTS）+ 截屏 + 错误回送。
  */
-import { ipcMain, type BrowserWindow } from 'electron';
+import { app, ipcMain, type BrowserWindow } from 'electron';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { log, type LogLevel } from '../core/log.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import { containsWakeWord } from '../core/wakeword.js';
 import { runSkill } from '../modules/skill-runner.js';
-import { CHANNELS, type Capabilities, type WakeRuntime } from '../shared/ipc.js';
+import { join } from 'node:path';
+import { CHANNELS, type Capabilities, type WakeRuntime, type ReplyStyle } from '../shared/ipc.js';
 
 /**
  * 注册 coach + voice + capabilities IPC handlers。主进程启动时调用一次。
@@ -40,6 +42,17 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     log[lv]('renderer:' + msg, extra);
   });
 
+  // ---- History helpers (used by runSkillPipeline below) ----
+  const historyPath = join(app.getPath('userData'), 'zuiti-history.json');
+
+  function readHistoryFile(): unknown[] {
+    try {
+      const data = readFileSync(historyPath, 'utf8');
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  }
+
   /**
    * skill 核心流水线（Plan 7: 委托给 runSkill 纯函数）：
    * text → 截屏（可选）→ runSkill → coach:result (SkillOutput)。
@@ -47,7 +60,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
    * - reply：流式蹦字 + TTS 首句先播
    * - explain/summarize：非流式一次性显示，不走 TTS
    */
-  async function runSkillPipeline(text: string, withScreenshot: boolean): Promise<void> {
+  async function runSkillPipeline(text: string, withScreenshot: boolean, style?: ReplyStyle): Promise<void> {
     const t0 = Date.now();
     log.info('coach.run.start', {
       inputLen: text.length,
@@ -67,12 +80,31 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
       }
     }
 
+    // Send screenshot preview to renderer
+    if (screenshotDataUrl) {
+      mainWindow.webContents.send(CHANNELS.coachScreenshot, screenshotDataUrl);
+    }
+
     try {
       const { output, summary } = await runSkill(text, screenshotDataUrl, {
         onReplyChunk: (reply) => mainWindow.webContents.send(CHANNELS.coachReplyChunk, reply),
         onTtsStart: (firstSentence) => startTtsStream(firstSentence, mainWindow),
+        style,
       });
       mainWindow.webContents.send(CHANNELS.coachResult, output);
+
+      // Append to history
+      try {
+        const entry = { id: Date.now(), ts: Date.now(), input: text.slice(0, 100), output: output.primary?.text.slice(0, 200) ?? '', style };
+        const history = readHistoryFile();
+        history.push(entry);
+        // Keep only last 100 entries
+        if (history.length > 100) history.splice(0, history.length - 100);
+        writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf8');
+      } catch (err) {
+        log.warn('history.append.failed', { msg: err instanceof Error ? err.message : String(err) });
+      }
+
       log.info('coach.run.ok', {
         tookMs: Date.now() - t0,
         skillId: summary.skillId,
@@ -87,9 +119,12 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     }
   }
 
-  /** TTS 流式合成 + 推给渲染层。失败发 ttsDone 让渲染层复位。 */
+  /** TTS 串行队列：首句先播，剩余文本排队等播完再播，避免并发混音。 */
+  let ttsQueue: Promise<void> = Promise.resolve();
+
+  /** TTS 流式合成 + 推给渲染层。失败发 ttsDone 让渲染层复位。串行排队。 */
   function startTtsStream(text: string, win: BrowserWindow): void {
-    void (async () => {
+    ttsQueue = ttsQueue.then(async () => {
       const t0 = Date.now();
       let chunkCount = 0;
       try {
@@ -98,7 +133,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
           win.webContents.send(CHANNELS.voiceTtsChunk, Buffer.from(chunk).toString('base64'));
         }
         win.webContents.send(CHANNELS.voiceTtsDone);
-        log.info('coach.tts.ok', { chunks: chunkCount, tookMs: Date.now() - t0 });
+        log.info('coach.tts.ok', { chunks: chunkCount, tookMs: Date.now() - t0, textLen: text.length });
       } catch (err) {
         log.warn('coach.tts.failed', {
           msg: err instanceof Error ? err.message : String(err),
@@ -107,16 +142,16 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         });
         win.webContents.send(CHANNELS.voiceTtsDone);
       }
-    })();
+    });
   }
 
   // 注意：preload 用 ipcRenderer.send（fire-and-forget），主进程用 ipcMain.on。
-  ipcMain.on(CHANNELS.coachRun, (_e, text: string, withScreenshot = false) => {
-    void runSkillPipeline(text, withScreenshot);
+  ipcMain.on(CHANNELS.coachRun, (_e, text: string, withScreenshot = false, style?: ReplyStyle) => {
+    void runSkillPipeline(text, withScreenshot, style);
   });
 
   /** voice:recorded → ASR → voice:transcript → 自动 skill 流水线。withScreenshot=true 时截屏看屏。 */
-  ipcMain.on(CHANNELS.voiceRecorded, (_e, base64DataUrl: string, withScreenshot = false) => {
+  ipcMain.on(CHANNELS.voiceRecorded, (_e, base64DataUrl: string, withScreenshot = false, style?: ReplyStyle) => {
     log.info('voice.recorded', { bytes: base64DataUrl.length, withScreenshot });
 
     void (async () => {
@@ -131,7 +166,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
           return;
         }
         mainWindow.webContents.send(CHANNELS.voiceTranscript, text);
-        await runSkillPipeline(text, withScreenshot);
+        await runSkillPipeline(text, withScreenshot, style);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         mainWindow.webContents.send(CHANNELS.voiceError, msg);
@@ -172,5 +207,43 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         log.error('voice.wakeCheck.error', { msg });
       }
     })();
+  });
+
+  // ---- History IPC ----
+  ipcMain.handle(CHANNELS.historyList, (_e, limit = 20): unknown[] => {
+    const all = readHistoryFile();
+    return all.slice(-limit).reverse();
+  });
+
+  ipcMain.handle(CHANNELS.historyClear, (): void => {
+    try {
+      unlinkSync(historyPath);
+      log.info('history.cleared');
+    } catch { /* file may not exist */ }
+  });
+
+  // ---- Settings IPC ----
+  const settingsPath = join(app.getPath('userData'), 'zuiti-settings.json');
+
+  function readSettingsFile(): Record<string, unknown> {
+    try { return JSON.parse(readFileSync(settingsPath, 'utf8')); }
+    catch { return {}; }
+  }
+
+  ipcMain.handle(CHANNELS.settingsGet, (_e, key?: string): Record<string, unknown> => {
+    const all = readSettingsFile();
+    if (key) return { [key]: all[key] };
+    return all;
+  });
+
+  ipcMain.handle(CHANNELS.settingsSet, (_e, patch: Record<string, unknown>): void => {
+    const all = readSettingsFile();
+    Object.assign(all, patch);
+    try {
+      writeFileSync(settingsPath, JSON.stringify(all, null, 2), 'utf8');
+      log.info('settings.saved', { keys: Object.keys(patch) });
+    } catch (err) {
+      log.error('settings.save.failed', { msg: err instanceof Error ? err.message : String(err) });
+    }
   });
 }
