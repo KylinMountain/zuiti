@@ -13,7 +13,7 @@
  * IPC 编排（send/chunk/TTS）+ 截屏 + 错误回送。
  */
 import { ipcMain, type BrowserWindow } from 'electron';
-import { log } from '../core/log.js';
+import { log, type LogLevel } from '../core/log.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import { containsWakeWord } from '../core/wakeword.js';
@@ -32,6 +32,14 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     wake,
   }));
 
+  /** 渲染层日志转发：写入同一个日志文件，agent 可统一分析。 */
+  ipcMain.on(CHANNELS.rendererLog, (_e, level: string, msg: string, extra?: Record<string, unknown>) => {
+    const lv = (['debug', 'info', 'warn', 'error'] as const).includes(level as never)
+      ? (level as LogLevel)
+      : 'info';
+    log[lv]('renderer:' + msg, extra);
+  });
+
   /**
    * skill 核心流水线（Plan 7: 委托给 runSkill 纯函数）：
    * text → 截屏（可选）→ runSkill → coach:result (SkillOutput)。
@@ -40,43 +48,63 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
    * - explain/summarize：非流式一次性显示，不走 TTS
    */
   async function runSkillPipeline(text: string, withScreenshot: boolean): Promise<void> {
+    const t0 = Date.now();
+    log.info('coach.run.start', {
+      inputLen: text.length,
+      withScreenshot,
+    });
     mainWindow.webContents.send(CHANNELS.coachLoading);
 
-    // 截屏看屏（红线：只在被唤醒/触发时截一次）
-    // 提前截屏：LLM 路由也要看屏判断意图
     let screenshotDataUrl: string | undefined;
     if (withScreenshot) {
       try {
+        const t1 = Date.now();
         const png = await captureScreen();
         screenshotDataUrl = pngToDataUrl(png);
+        log.info('coach.screenshot.ok', { bytes: png.length, tookMs: Date.now() - t1 });
       } catch (err) {
         log.warn('coach.screenshot.failed', { msg: err instanceof Error ? err.message : String(err) });
       }
     }
 
     try {
-      const { output } = await runSkill(text, screenshotDataUrl, {
+      const { output, summary } = await runSkill(text, screenshotDataUrl, {
         onReplyChunk: (reply) => mainWindow.webContents.send(CHANNELS.coachReplyChunk, reply),
         onTtsStart: (firstSentence) => startTtsStream(firstSentence, mainWindow),
       });
       mainWindow.webContents.send(CHANNELS.coachResult, output);
+      log.info('coach.run.ok', {
+        tookMs: Date.now() - t0,
+        skillId: summary.skillId,
+        inputLen: summary.inputLen,
+        outputShape: summary.outputShape,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
       mainWindow.webContents.send(CHANNELS.coachError, msg);
-      log.error('skill.run.error', { msg });
+      log.error('coach.run.error', { msg, stack, tookMs: Date.now() - t0 });
     }
   }
 
   /** TTS 流式合成 + 推给渲染层。失败发 ttsDone 让渲染层复位。 */
   function startTtsStream(text: string, win: BrowserWindow): void {
     void (async () => {
+      const t0 = Date.now();
+      let chunkCount = 0;
       try {
         for await (const chunk of await synthesizeSpeechStream(text)) {
+          chunkCount++;
           win.webContents.send(CHANNELS.voiceTtsChunk, Buffer.from(chunk).toString('base64'));
         }
         win.webContents.send(CHANNELS.voiceTtsDone);
+        log.info('coach.tts.ok', { chunks: chunkCount, tookMs: Date.now() - t0 });
       } catch (err) {
-        log.warn('coach.tts.failed', { msg: err instanceof Error ? err.message : String(err) });
+        log.warn('coach.tts.failed', {
+          msg: err instanceof Error ? err.message : String(err),
+          chunks: chunkCount,
+          tookMs: Date.now() - t0,
+        });
         win.webContents.send(CHANNELS.voiceTtsDone);
       }
     })();
@@ -87,9 +115,9 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     void runSkillPipeline(text, withScreenshot);
   });
 
-  /** voice:recorded → ASR → voice:transcript → 自动 skill 流水线（点一下说话模式）。 */
-  ipcMain.on(CHANNELS.voiceRecorded, (_e, base64DataUrl: string) => {
-    log.info('voice.recorded', { bytes: base64DataUrl.length });
+  /** voice:recorded → ASR → voice:transcript → 自动 skill 流水线。withScreenshot=true 时截屏看屏。 */
+  ipcMain.on(CHANNELS.voiceRecorded, (_e, base64DataUrl: string, withScreenshot = false) => {
+    log.info('voice.recorded', { bytes: base64DataUrl.length, withScreenshot });
 
     void (async () => {
       try {
@@ -103,7 +131,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
           return;
         }
         mainWindow.webContents.send(CHANNELS.voiceTranscript, text);
-        await runSkillPipeline(text, false);
+        await runSkillPipeline(text, withScreenshot);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         mainWindow.webContents.send(CHANNELS.voiceError, msg);

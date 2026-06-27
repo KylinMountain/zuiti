@@ -72,9 +72,13 @@ export function resolveLlmConfig(): ResolvedLlmConfig {
 /**
  * Plan 8：构造关 thinking 的 MiMo session 底座（pi）：authStorage + modelRegistry + 解析出的 model。
  * 复用 resolveLlmConfig（config.json > env）。createMiraSession 用它。
+ * @param hasScreenshot 带截图时切换到多模态模型（mimo-v2.5，pro 不支持图片）
  */
-export function createMiraModelRegistry() {
-  const { apiKey, baseURL, model } = resolveLlmConfig();
+export function createMiraModelRegistry(hasScreenshot = false) {
+  const cfg = resolveLlmConfig();
+  const { apiKey, baseURL } = cfg;
+  // 带截图时强制用多模态模型（mimo-v2.5-pro 不支持图片输入）
+  const modelId = hasScreenshot ? 'mimo-v2.5' : cfg.model;
   if (!apiKey || !baseURL) throw new Error('缺少 LLM_API_KEY / LLM_BASE_URL');
   const authStorage = AuthStorage.inMemory();
   const modelRegistry = ModelRegistry.inMemory(authStorage);
@@ -83,9 +87,9 @@ export function createMiraModelRegistry() {
     baseUrl: baseURL,
     apiKey,
     api: 'openai-completions',
-    models: [buildMiraModel(baseURL, model)],
+    models: [buildMiraModel(baseURL, modelId)],
   });
-  const resolved = modelRegistry.find('mimo', model);
-  if (!resolved) throw new Error(`MiMo model ${model} 注册失败`);
+  const resolved = modelRegistry.find('mimo', modelId);
+  if (!resolved) throw new Error(`MiMo model ${modelId} 注册失败`);
   return { authStorage, modelRegistry, model: resolved };
 }

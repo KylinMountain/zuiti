@@ -7,6 +7,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS, type Capabilities, type UniversalOutput } from '../shared/ipc.js';
 
 const api = {
+  /** 渲染层日志转发到主进程（写入同一个日志文件）。 */
+  rlog: (level: string, msg: string, extra?: Record<string, unknown>): void => {
+    ipcRenderer.send(CHANNELS.rendererLog, level, msg, extra);
+  },
   /** 查询能力（asr/tts/wake 是否可用 + wake 运行时含模型 base64）。渲染层启动时调用一次。 */
   capabilities: (): Promise<Capabilities> => ipcRenderer.invoke(CHANNELS.capabilities),
   /** 本地唤醒词命中时调用，请求主进程唤起面板。 */
@@ -17,9 +21,9 @@ const api = {
   runCoach: (text: string, withScreenshot = false): void => {
     ipcRenderer.send(CHANNELS.coachRun, text, withScreenshot);
   },
-  /** 发送录制的音频（base64 data URL）给主进程做 ASR。 */
-  sendRecordedAudio: (base64DataUrl: string): void => {
-    ipcRenderer.send(CHANNELS.voiceRecorded, base64DataUrl);
+  /** 发送录制的音频（base64 data URL）给主进程做 ASR。withScreenshot=true 时自动截屏看屏。 */
+  sendRecordedAudio: (base64DataUrl: string, withScreenshot = false): void => {
+    ipcRenderer.send(CHANNELS.voiceRecorded, base64DataUrl, withScreenshot);
   },
   /** 耳听八方模式：发送音频给主进程做唤醒词判定（含 Jarvis 才跑 coach）。 */
   sendWakeAudio: (base64DataUrl: string): void => {

@@ -30,7 +30,13 @@ export async function runSkill(
 ): Promise<RunSkillResult> {
   const runId = newRunId();
   const startTs = Date.now();
-  const { session, getEmit } = await createMiraSession();
+  log.info('skill.start', {
+    runId,
+    inputLen: text.length,
+    hasScreenshot: !!screenshotDataUrl,
+    model: screenshotDataUrl ? 'mimo-v2.5' : 'mimo-v2.5-pro',
+  });
+  const { session, getEmit } = await createMiraSession(!!screenshotDataUrl);
 
   let primary = '';
   let skillRead: string | undefined;
@@ -39,7 +45,10 @@ export async function runSkill(
   const unsub = session.subscribe((e) => {
     const j = safeJson(e);
     const sm = j.match(/skills\/(reply|explain|summarize)\/SKILL\.md/);
-    if (sm && !skillRead) skillRead = sm[1];
+    if (sm && !skillRead) {
+      skillRead = sm[1];
+      log.info('skill.selected', { runId, skillId: skillRead, latencyMs: Date.now() - startTs });
+    }
     const ame = (e as { assistantMessageEvent?: { type?: string; delta?: string } }).assistantMessageEvent;
     if (ame?.type === 'text_delta' && ame.delta) {
       primary += ame.delta;
@@ -50,6 +59,7 @@ export async function runSkill(
           const firstSentence = primary.slice(0, m.index + 1);
           if (firstSentence.length >= 2) {
             ttsStarted = true;
+            log.debug('skill.tts-start', { runId, firstSentenceLen: firstSentence.length, latencyMs: Date.now() - startTs });
             callbacks?.onTtsStart?.(firstSentence);
           }
         }
@@ -62,6 +72,14 @@ export async function runSkill(
       ? [{ type: 'text' as const, text }, dataUrlToImage(screenshotDataUrl)]
       : text;
     await session.sendUserMessage(content);
+  } catch (err) {
+    log.error('skill.run.error', {
+      runId,
+      msg: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      latencyMs: Date.now() - startTs,
+    });
+    throw err;
   } finally {
     unsub();
   }

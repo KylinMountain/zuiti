@@ -32,7 +32,7 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
 
   let off = 44;
   for (let i = 0; i < samples.length; i++, off += 2) {
-    const s = Math.max(-1, Math.min(1, samples[i])); // 钳到 [-1, 1]
+    const s = Math.max(-1, Math.min(1, samples[i] ?? 0)); // 钳到 [-1, 1]
     v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
   }
   return buffer;

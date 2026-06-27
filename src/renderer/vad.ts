@@ -90,13 +90,19 @@ export class VadDetector {
 }
 
 /** 从 AnalyserNode 取当前一帧的 RMS（0-1）。 */
-export function computeRms(analyser: AnalyserNode): number {
+export function computeRms(analyser: AnalyserLike): number {
   const buf = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(buf);
   let sumSq = 0;
   for (let i = 0; i < buf.length; i++) {
-    const v = (buf[i] - 128) / 128; // -1..1
+    const v = ((buf[i] ?? 0) - 128) / 128; // -1..1
     sumSq += v * v;
   }
   return Math.sqrt(sumSq / buf.length);
+}
+
+/** AnalyserNode 的结构化类型（鸭子类型，避免依赖 DOM lib）。 */
+export interface AnalyserLike {
+  fftSize: number;
+  getByteTimeDomainData(buf: Uint8Array): void;
 }

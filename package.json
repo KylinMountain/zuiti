@@ -16,8 +16,13 @@
     "test": "npm run build:node && node --test \"dist/test/*.test.js\"",
     "test:e2e": "npm run build:node && E2E_SKIP=0 node --test \"dist/test/e2e/*.test.js\"",
     "fetch-models": "node scripts/fetch-wake-models.mjs",
+    "smoke:main": "npm run build:node && node scripts/smoke-main.mjs",
+    "smoke:electron": "npm run build && electron scripts/smoke-electron.mjs",
     "start": "npm run build && electron .",
     "dev": "npm run build && electron . --enable-logging",
+    "dev:log": "npm run build && electron . 2>&1 | tee -a logs/app-$(date +%Y%m%d-%H%M%S).log",
+    "log:latest": "ls -t logs/app/*.log 2>/dev/null | head -1",
+    "log:tail": "tail -f $(ls -t logs/app/*.log 2>/dev/null | head -1)",
     "push": "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git push \"$@\""
   },
   "dependencies": {

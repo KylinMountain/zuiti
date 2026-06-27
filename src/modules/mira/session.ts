@@ -10,12 +10,15 @@ import { createMiraModelRegistry } from '../../core/provider.js';
 import { createEmitTool, type EmitResult } from '../../core/emit-tool.js';
 import { MIRA_SYSTEM_PROMPT, skillsDir } from './prompt.js';
 
-/** 构造嘴替 session + emit 取值器。每次 runSkill 调一次（emit 闭包独立）。 */
-export async function createMiraSession(): Promise<{
+/**
+ * 构造嘴替 session + emit 取值器。每次 runSkill 调一次（emit 闭包独立）。
+ * @param hasScreenshot 带截图时切换到多模态模型（mimo-v2.5，pro 不支持图片）
+ */
+export async function createMiraSession(hasScreenshot = false): Promise<{
   session: Awaited<ReturnType<typeof createAgentSession>>['session'];
   getEmit: () => EmitResult | null;
 }> {
-  const { authStorage, modelRegistry, model } = createMiraModelRegistry();
+  const { authStorage, modelRegistry, model } = createMiraModelRegistry(hasScreenshot);
   const { tool: emitTool, getResult } = createEmitTool();
 
   const skills = skillsDir();

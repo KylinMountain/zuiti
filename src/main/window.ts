@@ -5,6 +5,7 @@
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { log } from '../core/log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -36,9 +37,23 @@ export function createHudWindow(): BrowserWindow {
   // esbuild 把 hud.ts 打包到 dist/renderer/hud.js，copy-assets 把 hud.html/css + onnx wasm 拷过去
   win.loadFile(join(__dirname, '..', 'renderer', 'hud.html'));
 
+  win.webContents.on('did-finish-load', () => {
+    log.info('window.loaded', { url: 'hud.html' });
+  });
+  win.webContents.on('did-fail-load', (_e, code, desc) => {
+    log.error('window.load.failed', { code, desc });
+  });
+  win.on('closed', () => {
+    log.info('window.closed');
+  });
+
   // 失焦自动隐藏（用完即隐）
   win.on('blur', () => {
+    log.debug('window.blur.hide');
     win.hide();
+  });
+  win.on('show', () => {
+    log.debug('window.shown');
   });
 
   return win;
@@ -54,4 +69,5 @@ export function showHud(win: BrowserWindow): void {
   win.setPosition(x, y, false);
   win.show();
   win.focus();
+  log.debug('window.shown.position', { x, y, display: display.id });
 }

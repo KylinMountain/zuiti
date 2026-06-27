@@ -7,37 +7,156 @@
   <link rel="stylesheet" href="hud.css" />
 </head>
 <body>
-  <div class="hud">
-    <header class="hud__bar">
-      <span class="hud__title">嘴替</span>
-      <span class="hud__hint">你负责想，它负责嘴</span>
+  <!-- 动态背景层 -->
+  <div class="bg">
+    <div class="bg__gradient"></div>
+    <div class="bg__noise"></div>
+    <div class="bg__grid"></div>
+    <div class="bg__orb bg__orb--pink"></div>
+    <div class="bg__orb bg__orb--purple"></div>
+    <div class="bg__orb bg__orb--cyan"></div>
+  </div>
+
+  <div class="app">
+    <!-- Hero：嘴替头像 + 状态 -->
+    <header class="hero">
+      <div class="hero__avatar" id="avatar">
+        <div class="avatar">
+          <svg class="avatar__face" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- 脸 -->
+            <circle cx="60" cy="60" r="50" fill="url(#faceGrad)" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+            <!-- 眼睛 -->
+            <ellipse class="avatar__eye avatar__eye--left" cx="42" cy="52" rx="6" ry="7" fill="#1a0a1a"/>
+            <ellipse class="avatar__eye avatar__eye--right" cx="78" cy="52" rx="6" ry="7" fill="#1a0a1a"/>
+            <circle class="avatar__eye-shine" cx="44" cy="50" r="2" fill="#fff" opacity="0.6"/>
+            <circle class="avatar__eye-shine" cx="80" cy="50" r="2" fill="#fff" opacity="0.6"/>
+            <!-- 腮红 -->
+            <ellipse cx="30" cy="68" rx="10" ry="5" fill="#ff4d82" opacity="0.3"/>
+            <ellipse cx="90" cy="68" rx="10" ry="5" fill="#ff4d82" opacity="0.3"/>
+            <!-- 嘴（可动画） -->
+            <path class="avatar__mouth" d="M 40 78 Q 60 88 80 78" stroke="#1a0a1a" stroke-width="3" stroke-linecap="round" fill="none"/>
+            <!-- 牙 -->
+            <rect class="avatar__teeth" x="50" y="79" width="20" height="4" rx="1" fill="#fff" opacity="0"/>
+            <defs>
+              <linearGradient id="faceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#ff8fb1"/>
+                <stop offset="100%" stop-color="#c084fc"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <!-- 光晕 -->
+          <div class="avatar__halo"></div>
+          <div class="avatar__halo avatar__halo--2"></div>
+        </div>
+      </div>
+
+      <div class="hero__text">
+        <h1 class="hero__title">
+          <span class="hero__title-main">嘴替</span>
+          <span class="hero__title-sub" id="moodText">已就位，等你开麦</span>
+        </h1>
+      </div>
+
+      <!-- 说话波形 -->
+      <div class="wave" id="wave" hidden>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
     </header>
 
-    <section class="hud__input">
-      <textarea id="text" placeholder="说句真心话…（带情绪、口语都行）" rows="3"></textarea>
-      <div class="hud__row">
-        <label class="hud__check"><input type="checkbox" id="screenshot" checked /> 看屏</label>
-        <button id="go">替我说</button>
-      </div>
-      <div class="hud__row hud__row--voice">
-        <button id="mic" class="hud__mic" type="button" aria-label="点一下说话">
-          <span class="hud__mic-dot"></span>
-          <span class="hud__mic-label">点一下说话</span>
-        </button>
-        <label class="hud__check"><input type="checkbox" id="vadAuto" checked /> VAD 自动停</label>
-        <label class="hud__check"><input type="checkbox" id="wakeListen" /> 耳听八方（喊 Jarvis）</label>
-        <span id="voiceState" class="hud__voicestate" hidden></span>
+    <!-- 输入区 -->
+    <section class="input-zone">
+      <div class="input-wrap">
+        <textarea id="text" placeholder="说句真心话…想怼啥、想撩啥、想请假，尽管说" rows="2"></textarea>
+        <div class="input-actions">
+          <label class="screen-toggle">
+            <input type="checkbox" id="screenshot" checked />
+            <span class="screen-toggle__icon">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <circle cx="12" cy="11" r="3" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M7 21h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <span class="screen-toggle__label">看屏</span>
+          </label>
+          <button id="go" class="fire-btn">
+            <span class="fire-btn__text">替我喷</span>
+            <span class="fire-btn__icon">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </span>
+          </button>
+        </div>
       </div>
     </section>
 
-    <section id="status" class="hud__status" hidden></section>
+    <!-- 语音控制 -->
+    <section class="voice-bar">
+      <button id="mic" class="mic-btn" type="button">
+        <span class="mic-btn__ring"></span>
+        <span class="mic-btn__core">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" fill="currentColor"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 19v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="mic-btn__label">点一下开喷</span>
+      </button>
 
-    <!-- Plan 8: 通用输出视图（字段驱动：title? + primary + items + note?） -->
-    <section id="output" class="hud__result" hidden>
-      <h3 id="outTitle" class="hud__out-title" hidden></h3>
-      <p id="outPrimary" class="hud__out-primary"></p>
-      <div id="outItems" class="hud__candidates"></div>
-      <p id="outNote" class="hud__rationale" hidden></p>
+      <div class="voice-chips">
+        <label class="chip chip--active">
+          <input type="checkbox" id="vadAuto" checked />
+          <span>VAD 自动停</span>
+        </label>
+        <label class="chip chip--wake">
+          <input type="checkbox" id="wakeListen" />
+          <span>耳听八方</span>
+        </label>
+      </div>
+    </section>
+
+    <div id="voiceState" class="voice-state" hidden></div>
+
+    <!-- 加载：嘴替正在酝酿 -->
+    <section id="status" class="thinking" hidden>
+      <div class="thinking__bubbles">
+        <span>💭</span>
+        <span>🔥</span>
+        <span>⚡</span>
+      </div>
+      <p class="thinking__text">
+        <span id="thinkingText">嘴替正在酝酿大招…</span>
+        <span class="dots"><i>.</i><i>.</i><i>.</i></span>
+      </p>
+    </section>
+
+    <!-- 输出区 -->
+    <section id="output" class="output" hidden>
+      <h3 id="outTitle" class="output__title" hidden></h3>
+
+      <!-- 主回复（大卡片） -->
+      <div class="reply-card reply-card--primary">
+        <div class="reply-card__glow"></div>
+        <div class="reply-card__corner reply-card__corner--tl"></div>
+        <div class="reply-card__corner reply-card__corner--br"></div>
+        <div class="reply-card__badge">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z" fill="currentColor"/>
+          </svg>
+          <span>主打回复</span>
+        </div>
+        <p id="outPrimary" class="reply-card__text">
+          <span class="cursor"></span>
+        </p>
+      </div>
+
+      <!-- 备选 -->
+      <div id="outItems" class="reply-list"></div>
+
+      <p id="outNote" class="output__note" hidden></p>
     </section>
   </div>
 

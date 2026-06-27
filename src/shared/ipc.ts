@@ -57,6 +57,8 @@ export const CHANNELS = {
   onActivate: 'panel:activate',
   /** 渲染 → 主：查询能力（asr/tts/wake 是否可用 + wake 运行时）。 */
   capabilities: 'app:capabilities',
+  /** 渲染 → 主：渲染层日志转发（level, msg, extra）。 */
+  rendererLog: 'renderer:log',
 } as const;
 
 /** 唤醒词运行所需：openWakeWord 三个模型（base64）+ 阈值，由主进程下发给渲染。 */

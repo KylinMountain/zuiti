@@ -49,34 +49,55 @@ function activate(): void {
 }
 
 app.whenReady().then(() => {
+  log.info('app.ready', {
+    version: app.getVersion(),
+    node: process.versions.node,
+    electron: process.versions.electron,
+  });
+
   // 麦克风权限：渲染层需要录音（ASR + 唤醒词）。其余权限默认拒绝。
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) =>
-    cb(permission === 'media'),
-  );
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
+    const granted = permission === 'media';
+    log.debug('app.permission.request', { permission, granted });
+    cb(granted);
+  });
 
   hud = createHudWindow();
+  log.info('window.created');
+
   const wake = buildWakeRuntime();
   registerCoachIpc(hud, wake);
   createTray(activate);
+  log.info('ipc.registered');
 
   // 本地唤醒词命中（渲染层 openWakeWord 检出 "Jarvis"）→ 与热键同样的唤起。
-  ipcMain.on(CHANNELS.wake, () => activate());
+  ipcMain.on(CHANNELS.wake, () => {
+    log.info('wake.hit');
+    activate();
+  });
   if (wake) {
     log.info('wake.enabled', { threshold: wake.threshold });
   } else {
     log.info('wake.disabled', { reason: 'models missing or WAKE_THRESHOLD unset' });
   }
 
+  log.info('app.startup.done');
+
   // macOS：点 dock 图标也唤起
   app.on('activate', () => {
+    log.debug('app.activate.show');
     if (hud) showHud(hud);
   });
+}).catch((err) => {
+  log.error('app.startup.failed', { msg: err instanceof Error ? err.message : String(err) });
 });
 
 app.on('window-all-closed', () => {
+  log.debug('app.window-all-closed.tray-stay');
   // 托盘常驻：关窗不退出（不调用 app.quit() 即保持运行）
 });
 
 app.on('before-quit', () => {
+  log.info('app.before-quit');
   destroyTray();
 });

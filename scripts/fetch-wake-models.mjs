@@ -15,22 +15,22 @@ const ROOT = join(__dirname, '..');
 const MODELS_DIR = join(ROOT, 'models');
 
 // 模型清单（URL + 期望大小 bytes，校验完整性）
-// 这些是 openWakeWord 官方 releases 里的标准模型
+// openWakeWord 0.6.0 移除了所有模型文件（PR #50），统一从 v0.5.1 release 获取
 const MODELS = [
   {
     name: 'melspectrogram.onnx',
-    url: 'https://github.com/dscripka/openWakeWord/releases/download/v0.6.0/melspectrogram.onnx',
-    size: 8_073_315,
+    url: 'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx',
+    size: 1_087_958,
   },
   {
     name: 'embedding_model.onnx',
-    url: 'https://github.com/dscripka/openWakeWord/releases/download/v0.6.0/embedding_model.onnx',
-    size: 1_329_392,
+    url: 'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx',
+    size: 1_326_578,
   },
   {
     name: 'hey_jarvis_v0.1.onnx',
-    url: 'https://github.com/dscripka/openWakeWord/releases/download/v0.6.0/hey_jarvis_v0.1.onnx',
-    size: 573_704,
+    url: 'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.onnx',
+    size: 1_271_370,
   },
 ];
 

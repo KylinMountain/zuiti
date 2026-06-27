@@ -1,4 +1,5 @@
-// 嘴替 HUD 渲染逻辑 —— 监听 IPC、渲染卡片、点即复制、TTS 播放、点一下说话（VAD 自动停）。
+// 嘴替 HUD 渲染逻辑 —— 赛博霓虹版
+// 监听 IPC、渲染卡片、点即复制、TTS 播放、点一下说话（VAD 自动停）。
 // 通过 window.zuiti（preload 暴露）与主进程通信。
 // esbuild 把本文件打包成 dist/renderer/hud.js（ESM）。
 /* global window, document, AudioContext, navigator, MediaRecorder, Blob, DataView, Uint8Array, ArrayBuffer, btoa, AnalyserNode, atob */
@@ -7,15 +8,17 @@
 import { VadDetector, computeRms } from './vad.js';
 import { initWakeWord } from './wakeword.js';
 import { encodeWav } from './wav.js';
-import type { Capabilities, UniversalOutput } from '../shared/ipc.js';
+import { buildRenderPlan } from '../shared/render-plan.js';
+import type { Capabilities, UniversalOutput, WakeRuntime } from '../shared/ipc.js';
 
 declare global {
   interface Window {
     zuiti: {
+      rlog(level: string, msg: string, extra?: Record<string, unknown>): void;
       capabilities(): Promise<Capabilities>;
       wake(): void;
       runCoach(text: string, withScreenshot?: boolean): void;
-      sendRecordedAudio(base64DataUrl: string): void;
+      sendRecordedAudio(base64DataUrl: string, withScreenshot?: boolean): void;
       sendWakeAudio(base64DataUrl: string): void;
       onActivate(cb: () => void): void;
       onResult(cb: (dto: UniversalOutput) => void): void;
@@ -33,12 +36,29 @@ declare global {
 
 const api = window.zuiti;
 
+// ============ 渲染层日志转发 ============
+function rlog(level: string, msg: string, extra?: Record<string, unknown>): void {
+  try { api.rlog(level, msg, extra); } catch { /* ignore */ }
+}
+// 全局未捕获错误也转发
+window.addEventListener('error', (e) => {
+  rlog('error', 'uncaught', { msg: e.message, filename: e.filename, lineno: e.lineno });
+});
+window.addEventListener('unhandledrejection', (e) => {
+  rlog('error', 'unhandledrejection', { reason: String(e.reason) });
+});
+
+// 保存 wake 运行时，TTS 完成后重新初始化唤醒词用
+let caps_wake: WakeRuntime | null = null;
+
+// ============ DOM 引用 ============
 const $text = document.getElementById('text') as HTMLTextAreaElement;
 const $go = document.getElementById('go') as HTMLButtonElement;
 const $mic = document.getElementById('mic') as HTMLButtonElement;
-const $micLabel = $mic.querySelector('.hud__mic-label') as HTMLElement;
+const $micLabel = $mic.querySelector('.mic-btn__label') as HTMLElement;
 const $voiceState = document.getElementById('voiceState') as HTMLElement;
 const $status = document.getElementById('status') as HTMLElement;
+const $thinkingText = document.getElementById('thinkingText') as HTMLElement;
 const $output = document.getElementById('output') as HTMLElement;
 const $outTitle = document.getElementById('outTitle') as HTMLElement;
 const $outPrimary = document.getElementById('outPrimary') as HTMLElement;
@@ -47,8 +67,24 @@ const $outNote = document.getElementById('outNote') as HTMLElement;
 const $screenshot = document.getElementById('screenshot') as HTMLInputElement;
 const $vadAuto = document.getElementById('vadAuto') as HTMLInputElement;
 const $wakeListen = document.getElementById('wakeListen') as HTMLInputElement;
+const $avatar = document.getElementById('avatar') as HTMLElement;
+const $moodText = document.getElementById('moodText') as HTMLElement;
+const $wave = document.getElementById('wave') as HTMLElement;
 
-// TTS 流式播放：用 AudioContext 拼接 pcm16 块，首句先播
+const avatarFace = $avatar.querySelector('.avatar') as HTMLElement;
+
+// ============ 头像表情状态 ============
+function setAvatarState(state: 'idle' | 'thinking' | 'talking'): void {
+  avatarFace.classList.remove('avatar--thinking', 'avatar--talking');
+  if (state === 'thinking') avatarFace.classList.add('avatar--thinking');
+  if (state === 'talking') avatarFace.classList.add('avatar--talking');
+}
+
+function setMood(text: string): void {
+  $moodText.textContent = text;
+}
+
+// ============ TTS 流式播放 ============
 let audioCtx: AudioContext | null = null;
 let ttsStartTime = 0;
 
@@ -57,12 +93,24 @@ function ensureAudioCtx(): AudioContext {
   return audioCtx;
 }
 
+// ============ 发起请求 ============
+const THINKING_MOODS = [
+  '嘴替正在酝酿大招…',
+  '脑暴中，稍等…',
+  '正在组织嘴炮语言…',
+  '灵感来了，马上好！',
+];
+
 function runCoach(): void {
   const text = $text.value.trim();
   if (!text) return;
+  rlog('info', 'coach.run', { textLen: text.length, withScreenshot: !!$screenshot?.checked });
   $go.disabled = true;
   $output.hidden = true;
   $status.hidden = false;
+  $thinkingText.textContent = THINKING_MOODS[Math.floor(Math.random() * THINKING_MOODS.length)];
+  setAvatarState('thinking');
+  setMood('思考中…');
   const withScreenshot = $screenshot && $screenshot.checked;
   api.runCoach(text, withScreenshot);
 }
@@ -85,26 +133,32 @@ let vad: VadDetector | null = null;
 let vadTimer: ReturnType<typeof setInterval> | null = null;
 let vadPendingStart = false;
 let pressedHoldMode = false;
+let wakeTriggeredRecording = false;  // 唤醒触发的录音，完成后走 wakeCheck（带截图）
 
 function setRecordingState(on: boolean): void {
   recording = on;
   if (on) {
-    $mic.classList.add('hud__mic--recording');
-    $micLabel.textContent = '再说一句…';
+    $mic.classList.add('mic-btn--recording');
+    $micLabel.textContent = '喷就完了…';
     $voiceState.hidden = false;
     $voiceState.textContent = $vadAuto.checked ? '听你说…说完自动发' : '录音中…';
+    setAvatarState('talking');
+    setMood('听你说…');
   } else {
-    $mic.classList.remove('hud__mic--recording');
-    $micLabel.textContent = '点一下说话';
+    $mic.classList.remove('mic-btn--recording');
+    $micLabel.textContent = '点一下开喷';
+    if (!$wakeListen.checked) setAvatarState('idle');
   }
 }
 
 async function startRecording(): Promise<void> {
   if (recording) return;
+  rlog('info', 'mic.start');
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    rlog('info', 'mic.stream.ok', { tracks: micStream.getAudioTracks().length });
     audioChunks = [];
     mediaRecorder = new MediaRecorder(micStream);
     mediaRecorder.ondataavailable = (e) => {
@@ -115,7 +169,6 @@ async function startRecording(): Promise<void> {
     setRecordingState(true);
 
     if ($vadAuto.checked) {
-      // VAD 自动模式：开 AnalyserNode + VadDetector，先空录等说话
       const ac = ensureAudioCtx();
       const source = ac.createMediaStreamSource(micStream);
       analyser = ac.createAnalyser();
@@ -125,13 +178,14 @@ async function startRecording(): Promise<void> {
       vad = new VadDetector({
         tickMs: 100,
         onStateChange: (state) => {
+          rlog('debug', 'vad.state', { state, vadPendingStart });
           if (state === 'speaking' && !vadPendingStart) {
             vadPendingStart = true;
-            // 真正开始 MediaRecorder（之前的 buffer 不录，避免环境噪音前导）
             mediaRecorder?.start();
+            rlog('info', 'vad.recording.start');
             $voiceState.textContent = '在说…说完自动停';
           } else if (state === 'silence' && vadPendingStart && recording) {
-            // 说话结束 → 停录音
+            rlog('info', 'vad.recording.stop');
             $voiceState.textContent = '识别中…';
             stopRecording(true);
           }
@@ -142,10 +196,11 @@ async function startRecording(): Promise<void> {
         vad.feed(computeRms(analyser));
       }, 100);
     } else {
-      // 按住模式：立刻开始录
       mediaRecorder.start();
+      rlog('info', 'mic.recording.manual');
     }
   } catch (err) {
+    rlog('error', 'mic.start.failed', { msg: err instanceof Error ? err.message : String(err) });
     $voiceState.hidden = false;
     $voiceState.textContent = '麦克风不可用：' + (err instanceof Error ? err.message : String(err));
   }
@@ -153,18 +208,9 @@ async function startRecording(): Promise<void> {
 
 function stopRecording(autoMode = false): void {
   if (!recording) return;
-  // 清 VAD timer
-  if (vadTimer) {
-    clearInterval(vadTimer);
-    vadTimer = null;
-  }
-  if (vad) {
-    vad = null;
-  }
-  if (analyser) {
-    try { analyser.disconnect(); } catch {}
-    analyser = null;
-  }
+  if (vadTimer) { clearInterval(vadTimer); vadTimer = null; }
+  if (vad) { vad = null; }
+  if (analyser) { try { analyser.disconnect(); } catch {} analyser = null; }
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
@@ -177,7 +223,9 @@ function stopRecording(autoMode = false): void {
 }
 
 async function handleRecordingStop(): Promise<void> {
+  rlog('info', 'mic.stop', { chunks: audioChunks.length });
   if (audioChunks.length === 0) {
+    rlog('warn', 'mic.stop.empty');
     $voiceState.hidden = true;
     return;
   }
@@ -185,17 +233,24 @@ async function handleRecordingStop(): Promise<void> {
   $voiceState.textContent = '识别中…';
   try {
     const blob = new Blob(audioChunks, { type: 'audio/webm' });
+    rlog('debug', 'mic.decode', { blobSize: blob.size });
     const arrayBuf = await blob.arrayBuffer();
-    // webm/opus → AudioBuffer（浏览器原生解码）
     const tmpCtx = new AudioContext();
     const audioBuf = await tmpCtx.decodeAudioData(arrayBuf);
     tmpCtx.close();
-    // AudioBuffer → WAV (pcm16)
     const samples = audioBuf.getChannelData(0);
     const wavBuf = encodeWav(samples, audioBuf.sampleRate);
     const base64 = bytesToBase64(new Uint8Array(wavBuf));
-    api.sendRecordedAudio('data:audio/wav;base64,' + base64);
+    rlog('info', 'mic.sendAsr', { wavBytes: wavBuf.byteLength, sampleRate: audioBuf.sampleRate, wakeTriggered: wakeTriggeredRecording });
+    if (wakeTriggeredRecording) {
+      // 唤醒触发的录音：直接 ASR + 带截图看屏（不走 wakeCheck，用户已唤醒无需再检测）
+      wakeTriggeredRecording = false;
+      api.sendRecordedAudio('data:audio/wav;base64,' + base64, true);
+    } else {
+      api.sendRecordedAudio('data:audio/wav;base64,' + base64);
+    }
   } catch (err) {
+    rlog('error', 'mic.decode.failed', { msg: err instanceof Error ? err.message : String(err) });
     $voiceState.textContent = '音频处理失败：' + (err instanceof Error ? err.message : String(err));
   }
 }
@@ -209,7 +264,6 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// 点击 mic 按钮：VAD 模式 = 切换开/关；按住模式 = mousedown 开 / mouseup 停
 $mic.addEventListener('click', () => {
   if (recording) {
     stopRecording(false);
@@ -218,7 +272,6 @@ $mic.addEventListener('click', () => {
   }
 });
 
-// 按住 fallback（VAD 关闭时启用）：mousedown 开 / mouseup 停
 function shouldUseHoldMode(): boolean {
   return !$vadAuto.checked;
 }
@@ -257,47 +310,64 @@ $mic.addEventListener('touchcancel', endHold);
 api.onLoading(() => {
   $status.hidden = false;
   $output.hidden = true;
+  setAvatarState('thinking');
+  setMood('思考中…');
 });
 
-// 流式 reply 蹦字：边生成边显示，不等整段 JSON 收完（只对 reply skill 触发）
+// 流式 reply 蹦字
 api.onReplyChunk((primarySoFar) => {
   if ($output.hidden) {
     $status.hidden = true;
     $output.hidden = false;
     $outTitle.hidden = true;
-    $outPrimary.textContent = '';
     $outItems.innerHTML = '';
     $outNote.hidden = true;
+    setAvatarState('talking');
+    setMood('正在输出…');
   }
-  $outPrimary.textContent = primarySoFar;
+  renderPrimaryWithCursor(primarySoFar, true);
 });
 
-// Plan 8: 字段驱动通用渲染（title? + primary + items + note?，有几条 item 显示几条）
+function renderPrimaryWithCursor(text: string, streaming: boolean): void {
+  const cursor = $outPrimary.querySelector('.cursor');
+  $outPrimary.textContent = text;
+  if (streaming && text.length > 0) {
+    const c = document.createElement('span');
+    c.className = 'cursor';
+    $outPrimary.appendChild(c);
+  } else if (cursor) {
+    cursor.remove();
+  }
+}
+
+// 字段驱动通用渲染
 api.onResult((dto) => {
   $status.hidden = true;
   $voiceState.hidden = true;
   $go.disabled = false;
+  setAvatarState('idle');
+  setMood('搞定，挑一条发！');
 
-  $outTitle.textContent = dto.title ?? '';
-  $outTitle.hidden = !dto.title;
+  const plan = buildRenderPlan(dto);
+  $outTitle.textContent = plan.titleText;
+  $outTitle.hidden = !plan.titleVisible;
 
-  $outPrimary.textContent = dto.primary?.text ?? '';
+  renderPrimaryWithCursor(plan.primaryText, false);
 
   $outItems.innerHTML = '';
-  for (const it of dto.items ?? []) {
-    const card = document.createElement('article');
-    card.className = 'card';
-    const chip = it.label ? '<div class="card__chip"></div>' : '';
-    const copy = it.copyable ? '<button class="card__copy">复制</button>' : '';
-    card.innerHTML = chip + '<p class="card__text"></p>' + copy;
-    if (it.label) (card.querySelector('.card__chip') as HTMLElement).textContent = it.label;
-    (card.querySelector('.card__text') as HTMLElement).textContent = it.text;
-    if (it.copyable) bindCopy(card.querySelector('.card__copy') as HTMLButtonElement, it.text);
-    $outItems.appendChild(card);
+  for (const it of plan.items) {
+    const item = document.createElement('div');
+    item.className = 'reply-item';
+    const tag = it.label ? `<div class="reply-item__tag">${escapeHtml(it.label)}</div>` : '';
+    const copy = it.copyable ? '<button class="reply-item__copy">复制</button>' : '';
+    item.innerHTML = tag + `<p class="reply-item__text"></p>` + copy;
+    (item.querySelector('.reply-item__text') as HTMLElement).textContent = it.text;
+    if (it.copyable) bindCopy(item.querySelector('.reply-item__copy') as HTMLButtonElement, it.text);
+    $outItems.appendChild(item);
   }
 
-  $outNote.textContent = dto.note ?? '';
-  $outNote.hidden = !dto.note;
+  $outNote.textContent = plan.noteText;
+  $outNote.hidden = !plan.noteVisible;
 
   $output.hidden = false;
 });
@@ -306,24 +376,26 @@ api.onError((msg) => {
   $status.hidden = true;
   $voiceState.hidden = true;
   $go.disabled = false;
+  setAvatarState('idle');
+  setMood('啊哦，出错了');
   $outTitle.hidden = true;
-  $outPrimary.textContent = '出错了：' + msg;
+  renderPrimaryWithCursor('出错了：' + msg, false);
   $outItems.innerHTML = '';
   $outNote.hidden = true;
   $output.hidden = false;
 });
 
 api.onTranscript((text) => {
-  // ASR 转写回填 textarea（用户能看到听到的是啥，主进程会自动跑 coach）
   $text.value = text;
 });
 
 api.onVoiceError((msg) => {
   $voiceState.hidden = false;
   $voiceState.textContent = '语音出错：' + msg;
+  setAvatarState('idle');
 });
 
-// TTS 流式播放：收到 base64 pcm16 块 → 解码 → 排队播放（首句先播）
+// TTS 流式播放
 api.onTtsChunk((base64) => {
   if (!ttsStartTime) ttsStartTime = audioCtx ? audioCtx.currentTime : 0;
   const ctx = ensureAudioCtx();
@@ -338,15 +410,24 @@ api.onTtsChunk((base64) => {
   src.connect(ctx.destination);
   src.start(ttsStartTime);
   ttsStartTime += buf.duration;
+
+  // TTS 播放时显示波形 + 头像说话态
+  $wave.hidden = false;
+  setAvatarState('talking');
 });
 
 api.onTtsDone(() => {
   ttsStartTime = 0;
+  $wave.hidden = true;
+  setAvatarState('idle');
+  // TTS 完成后重新启动唤醒词监听（之前唤醒时停掉了）
+  if (!stopWakeWordFn && caps_wake) {
+    rlog('info', 'ttsDone.restartWakeWord');
+    void restartWakeWord();
+  }
 });
 
 // ============ 耳听八方（持续监听 Jarvis） ============
-// 状态机：off → listening → waked（命中）→ processing → listening
-// listening：持续开麦 + VAD 录到一段 → sendWakeAudio → 等 voice:wakeMiss / voice:transcript
 let wakeStream: MediaStream | null = null;
 let wakeAnalyser: AnalyserNode | null = null;
 let wakeVad: VadDetector | null = null;
@@ -357,10 +438,12 @@ let wakeListening = false;
 
 async function startWakeListening(): Promise<void> {
   if (wakeListening) return;
+  rlog('info', 'wakeListen.start');
   try {
     wakeStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    rlog('info', 'wakeListen.stream.ok');
     const ac = ensureAudioCtx();
     const source = ac.createMediaStreamSource(wakeStream);
     wakeAnalyser = ac.createAnalyser();
@@ -370,6 +453,7 @@ async function startWakeListening(): Promise<void> {
     wakeListening = true;
     $voiceState.hidden = false;
     $voiceState.textContent = '👂 耳听八方（喊 Jarvis）…';
+    setMood('随时待命，喊我就行');
 
     wakeVad = new VadDetector({
       tickMs: 100,
@@ -413,6 +497,7 @@ function stopWakeListening(): void {
   wakeVad = null;
   wakeListening = false;
   $voiceState.hidden = true;
+  setMood('已就位，等你开麦');
 }
 
 async function handleWakeStop(): Promise<void> {
@@ -447,38 +532,87 @@ api.onWakeMiss((_text) => {
   }
 });
 
-// 被唤起（热键/托盘/唤醒词命中）→ 聚焦输入
+// 被唤起 → 聚焦输入 + 自动开始录音（唤醒后直接说话）
 api.onActivate(() => {
+  rlog('info', 'activate');
   $text.focus();
+  // 唤醒后自动开麦，用户直接说话即可
+  if (!recording) {
+    wakeTriggeredRecording = true;
+    void startRecording();
+  }
 });
+
+// 唤醒词命中时，如果耳听八方开着，先停掉它，避免和录音抢麦克风
+let stopWakeWordFn: (() => Promise<void>) | null = null;
+
+/** 重新启动唤醒词监听（TTS 完成后调用，恢复常驻监听）。 */
+async function restartWakeWord(): Promise<void> {
+  if (!caps_wake || stopWakeWordFn) return;
+  try {
+    stopWakeWordFn = await initWakeWord(caps_wake, () => {
+      rlog('info', 'wakeword.hit');
+      origOnWakeHit();
+      if (stopWakeWordFn) {
+        rlog('info', 'wakeHit.stopOpenWakeWord');
+        stopWakeWordFn().catch(() => {});
+        stopWakeWordFn = null;
+      }
+      api.wake();
+      $voiceState.hidden = false;
+      $voiceState.textContent = '✨ Jarvis 唤醒！';
+      setMood('在！说~');
+    });
+    rlog('info', 'wakeword.restart.ok');
+  } catch (err) {
+    rlog('error', 'wakeword.restart.failed', { msg: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+const origOnWakeHit = () => {
+  if (wakeListening) {
+    rlog('info', 'wakeHit.stopWakeListen');
+    stopWakeListening();
+  }
+};
 
 // ============ 启动：查能力 + 初始化本地 openWakeWord ============
 void api.capabilities().then(async (caps) => {
-  // openWakeWord 本地唤醒：完全离线、无 Key、不联网
+  rlog('info', 'caps', { asr: caps.asr, tts: caps.tts, wake: !!caps.wake });
+  caps_wake = caps.wake;
   if (caps.wake) {
     try {
-      await initWakeWord(caps.wake, () => {
-        // 命中 "Jarvis" → 通知主进程唤起面板（截屏 + 显示 + 聚焦）
+      stopWakeWordFn = await initWakeWord(caps.wake, () => {
+        rlog('info', 'wakeword.hit');
+        origOnWakeHit();
+        if (stopWakeWordFn) {
+          rlog('info', 'wakeHit.stopOpenWakeWord');
+          stopWakeWordFn().catch(() => {});
+          stopWakeWordFn = null;
+        }
         api.wake();
         $voiceState.hidden = false;
         $voiceState.textContent = '✨ Jarvis 唤醒！';
+        setMood('在！说~');
       });
+      rlog('info', 'wakeword.init.ok');
       $voiceState.hidden = false;
       $voiceState.textContent = '👂 在听 "Jarvis"…（本地离线）';
       setTimeout(() => { $voiceState.hidden = true; }, 2000);
     } catch (err) {
-      console.error('Wake word init failed:', err);
+      rlog('error', 'wakeword.init.failed', { msg: err instanceof Error ? err.message : String(err) });
       $voiceState.hidden = false;
       $voiceState.textContent = '唤醒词初始化失败：' + (err instanceof Error ? err.message : String(err));
     }
   } else {
-    // 模型缺失：默认隐藏耳听八方选项，提示用户跑 fetch-models
+    rlog('warn', 'wakeword.disabled', { reason: 'no wake runtime' });
     $wakeListen.disabled = true;
     const label = $wakeListen.closest('label');
     if (label) label.title = '未启用：运行 npm run fetch-models 下载 openWakeWord 模型';
   }
 });
 
+// ============ 工具函数 ============
 function bindCopy(btn: HTMLButtonElement, text: string): void {
   btn.addEventListener('click', async () => {
     try {
@@ -493,12 +627,21 @@ function bindCopy(btn: HTMLButtonElement, text: string): void {
     }
     const old = btn.textContent;
     btn.textContent = '已复制';
-    btn.classList.add('card__copy--done');
+    btn.classList.add('reply-item__copy--done');
     setTimeout(() => {
       btn.textContent = old;
-      btn.classList.remove('card__copy--done');
+      btn.classList.remove('reply-item__copy--done');
     }, 1200);
   });
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 $text.focus();
