@@ -637,6 +637,10 @@ html, body {
   padding: 20px 0;
   animation: fadeInUp var(--t-slow) var(--ease-out) both;
 }
+/* 对话开始后空状态用 [hidden] 隐藏——显式覆盖上面的 display:flex（否则 [hidden] 失效）。 */
+.transcript__empty[hidden] {
+  display: none;
+}
 .transcript__empty p {
   font-size: 13px;
   color: var(--text-muted);
