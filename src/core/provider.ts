@@ -1,15 +1,17 @@
 /**
- * Provider 适配层 —— 把 OpenAI 兼容的 Chat Completions 端点（如小米 MiMo）接进 agents SDK。
+ * Provider 适配层（Plan 8 pi）—— 把 OpenAI 兼容的 Chat Completions 端点（如小米 MiMo）
+ * 接进 pi 的 ModelRegistry。
  *
  * 不变点（见 ARCHITECTURE.md）：
- * - LLM 不用 SDK 的 outputType；JSON 经 modelSettings.providerData 的 json_object 产出，上层 zod 校验。
- * - MiMo 走 chat_completions API（非 responses），需 setOpenAIAPI('chat_completions')。
+ * - 经 pi `ModelRegistry.inMemory(authStorage).registerProvider('mimo', …)` 注册 MiMo（api:'openai-completions'）。
+ * - MiMo 关 thinking（见 mira-model.ts）：挂工具时开 thinking 首字 21-32s，关掉 <1s 且"先文本流式 → 后 emit_result"顺序正确。
+ * - 结构化输出走 emit_result 工具（不用 SDK json_schema，MiMo 不支持）；主体 primary 走文本流式。
  *
  * 配置来源（优先级：config.json > env > 默认）：
- * - LLM_API_KEY   （.env）小米 LLM key，必填才能真打模型
- * - LLM_BASE_URL  （.env）OpenAI 兼容端点，如 MiMo；缺省走 OpenAI 官方
+ * - LLM_API_KEY   （.env）小米 LLM key，createMiraModelRegistry 必填（缺则抛错）
+ * - LLM_BASE_URL  （.env）OpenAI 兼容端点（如 MiMo），createMiraModelRegistry 必填（缺则抛错）
  * - LLM_MODEL     （.env）模型名；缺省 gpt-4o-mini
- * - ASR_API_KEY / TTS_API_KEY （.env）语音 harness 用，本层不消费，见 src/core/voice.ts（Plan 3）
+ * - ASR_API_KEY / TTS_API_KEY （.env）语音 harness 用，本层不消费，见 src/core/voice.ts
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

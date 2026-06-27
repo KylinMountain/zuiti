@@ -30,14 +30,14 @@ Zuiti (嘴替, literally "mouth-double") turns that "stuck on the tip" into "nai
 | 🔒 | **Local offline wake word** | Powered by [openWakeWord](https://github.com/dscripka/openWakeWord) ONNX inference — **fully local, offline, zero API key, no continuous cloud streaming** |
 | 👀 | **Screenshot context awareness** | Captures screen once on wake, feeds to multimodal LLM. **Never continuously monitors** |
 | 🗣️ | **Voice input** | ASR transcribes your casual, emotional, spoken-language input |
-| ⚡ | **Streaming reply + first-sentence TTS** | `reply` is the first JSON key (architectural invariant) for instant streaming |
+| ⚡ | **Streaming reply + first-sentence TTS** | The main reply streams at the session level (pi `text_delta`, not tied to a field name); the first sentence plays as soon as it lands, structured alternatives follow |
 | 🎨 | **Multi-style candidates** | One recommended + 2-3 tagged alternatives (flirty / assertive / steady / professional / English), one-click copy |
 | 🤚 | **VAD auto-stop** | Pure-TS RMS energy detection, stops recording when you stop talking |
 | 🧩 | **Skill extension base** | Today it helps you flirt / rebut / talk to your boss; tomorrow it can write Xiaohongshu posts, battle customer service, decode passive-aggressive messages |
 
 ## Three-Step Rescue
 
-<img src="./docs/images/flow.svg" alt="Three-step flow" width="100%" />
+<img src="./assets/flow.svg" alt="Three-step flow" width="100%" />
 
 | STEP 01 | STEP 02 | STEP 03 |
 |---------|---------|---------|
@@ -102,9 +102,9 @@ Zuiti (嘴替, literally "mouth-double") turns that "stuck on the tip" into "nai
 
 ## Tech Stack
 
-TypeScript (ESM) · Node ≥ 22 · Electron 42 · `@openai/agents` · zod v4 · onnxruntime-web · @picovoice/web-voice-processor · esbuild
+TypeScript (ESM) · Node ≥ 22 · Electron 42 · `@earendil-works/pi-*` (agent base: single session + Agent Skills) · onnxruntime-web · @picovoice/web-voice-processor · esbuild
 
-LLM via Xiaomi MiMo (OpenAI-compatible endpoint).
+LLM via Xiaomi MiMo (OpenAI-compatible endpoint, thinking disabled).
 
 ## Quick Start
 
@@ -120,8 +120,9 @@ Wake word is off by default. Set `WAKE_THRESHOLD=0.5` in `.env` or env to enable
 ## Development
 
 ```bash
-npm run typecheck   # dual tsconfig (main + renderer)
-npm test            # build + node:test (45 tests, includes arch lint)
+npm run typecheck   # dual tsconfig (main + renderer; renderer-only type errors surface only here)
+npm test            # build (tsconfig.json, excludes renderer) + node:test (includes arch lint)
+npm run test:e2e    # real-MiMo e2e (needs LLM key in .env; skipped in CI)
 npm run build       # compile main + esbuild bundle renderer
 ```
 
@@ -135,17 +136,18 @@ Layered dependencies flow forward only: `Types → Config → Core → Modules �
 
 ```
 src/
-├── core/              # harness base (provider/voice/screenshot/streamparse/skill/log)
-├── modules/reply/     # zuiti skill (ReplyCoach Agent + CoachOutput schema)
+├── core/              # harness base (provider/mira-model/emit-tool/voice/screenshot/wakeword/log)
+├── modules/           # zuiti single session (mira/) + skill-runner (stream + assemble UniversalOutput)
 ├── main/              # Electron main process (window/tray/IPC/wake model delivery)
-├── renderer/          # HUD overlay + local openWakeWord (esbuild bundled)
-├── shared/ipc.ts      # IPC contract (CHANNELS + WakeRuntime + Capabilities)
+├── renderer/          # HUD overlay + local openWakeWord (esbuild bundled, field-driven render)
+├── shared/ipc.ts      # IPC contract (CHANNELS + UniversalOutput + WakeRuntime + Capabilities)
 └── test/              # node:test (includes architecture.test.ts arch lint)
+skills/                # Agent Skills: reply / explain / summarize (one SKILL.md each, progressive disclosure)
 ```
 
 Key invariants (mechanically enforced):
-1. **`reply` must be the first key in model output JSON** — required for streaming and TTS.
-2. **LLM must not use SDK `outputType`** — JSON via `providerData.json_object`, validated by zod.
+1. **MiMo thinking is disabled** — with tools + thinking on, first token takes 21-32s; off → <1s and the order is correct (text stream first, then `emit_result`).
+2. **Structured output goes through the `emit_result` tool** — the main `primary` streams at the session level (not tied to a field name); no SDK json_schema (MiMo doesn't support it).
 3. **Layer dependency red line** — renderer never touches Node directly, only via `window.zuiti` (preload contextBridge).
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) · [AGENTS.md](./AGENTS.md).
