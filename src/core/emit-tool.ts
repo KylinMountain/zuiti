@@ -40,5 +40,5 @@ export function createEmitTool() {
       return { content: [{ type: 'text' as const, text: 'ok' }], details: {} };
     },
   });
-  return { tool, getResult: () => result };
+  return { tool, getResult: () => result, reset: () => { result = null; } };
 }
