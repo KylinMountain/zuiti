@@ -1,11 +1,11 @@
 # ARCHITECTURE.md
 
 > 嘴替的顶层架构地图。改代码前先读这个。
-> 当前架构：**Plan 8 pi 迁移**后（单 pi session + Agent Skills 渐进式披露 + 通用输出层）。
+> 当前架构：**Plan 9 连续多轮对话**后（单 pi session + Agent Skills 渐进式披露 + 通用输出层 + `MiraConversation` 多轮记忆 + 连续对话状态机）。
 
 ## 一句话
 
-托盘常驻桌面应用 → 唤醒（托盘点击 / 全局快捷键 / 语音"Jarvis"本地 openWakeWord）→ 截屏看懂上下文 → 输入真心话 → 单个嘴替 pi session 自主选用 skill → 主体文本流式蹦字（+ 首句先播 TTS）+ `emit_result` 补结构化备选 → 字段驱动渲染、一键复制发出。
+托盘常驻桌面应用 → 唤醒（托盘点击 / 全局快捷键 / 语音"Jarvis"本地 openWakeWord）→ 截屏看懂上下文 → 输入真心话 → 单个嘴替 pi session 自主选用 skill → 主体文本流式蹦字（+ 首句先播 TTS）+ `emit_result` 补结构化备选 → 字段驱动渲染、一键复制发出 → TTS 结束后自动重开麦（连续多轮），10s 无人开口收麦待唤醒。
 
 ## 分层模型（依赖只能"向前"）
 
@@ -19,22 +19,26 @@ Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
 
 - **Types**：跨进程类型在 `src/shared/ipc.ts`——`CHANNELS` + `UniversalOutput` + `UniversalItem` + `WakeRuntime` + `Capabilities`。零运行时依赖（渲染层 DOM lib 与主进程都编译它）。
 - **Config / Providers**：`src/core/provider.ts`——读 `.env`（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`），用 pi 的 `ModelRegistry.inMemory(authStorage).registerProvider('mimo', …)` 注册 MiMo（OpenAI 兼容端点）。`src/core/mira-model.ts`——MiMo model 元数据（**关 thinking**）。
-- **Core**：`src/core/`——harness 底座：`provider.ts`（接 MiMo）、`mira-model.ts`（关 thinking）、`emit-tool.ts`（`emit_result` 工具工厂）、`log.ts`（结构化日志 + `RunSummary`）、`voice.ts`（ASR/TTS）、`screenshot.ts`、`wakeword.ts`（`containsWakeWord` 文本判定）。
+- **Core**：`src/core/`——harness 底座：`provider.ts`（接 MiMo）、`mira-model.ts`（关 thinking）、`emit-tool.ts`（`emit_result` 工具工厂）、`log.ts`（结构化日志 + `RunSummary`）、`voice.ts`（ASR/TTS）、`screenshot.ts`。
 - **Modules**：`src/modules/`——嘴替 session + skill 流水线：
   - `mira/prompt.ts`——`MIRA_SYSTEM_PROMPT`（嘴替人格，替换 pi 默认 coding prompt）+ `skillsDir()`。
   - `mira/session.ts`——`createMiraSession`：组装单个 pi session（关 thinking MiMo + system prompt + skills 披露 + `tools:['read','emit_result']`）。
-  - `skill-runner.ts`——`runSkill`：跑 session、订阅文本流式蹦字 + 首句 TTS、收 `emit_result`、组装 `UniversalOutput`、写 `RunSummary`。
-- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期 + 唤醒词模型下发 + 麦克风权限）、`window.ts`（HUD 浮窗）、`tray.ts`（托盘 + 快捷键）、`ipc.ts`（`runSkillPipeline`：截屏 → `runSkill` → `coach:result` 发 `UniversalOutput`）、`preload.ts`（contextBridge）。
-- **Renderer (UI)**：`src/renderer/`——HUD 浮窗 + 本地唤醒词：
-  - `hud.ts`（主入口，esbuild 打包到 `dist/renderer/hud.js`，**字段驱动渲染** `UniversalOutput`）
+  - `mira/conversation.ts`——`MiraConversation`：多轮记忆容器，持久化 pi session 跨轮复用，`nextTurn()` 追加上下文，`reset()` 开新对话。
+  - `skill-runner.ts`——`runSkill`：跑 session、订阅文本流式蹦字 + 首句 TTS、收 `emit_result`、组装 `UniversalOutput`、写 `RunSummary`；同时导出 `RunSkillCallbacks`/`RunSkillResult` 供 `MiraConversation` 复用。
+- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期 + 唤醒词模型下发 + 麦克风权限）、`window.ts`（HUD 满高右侧常驻浮窗，置顶，toggle 收起）、`tray.ts`（托盘 + 快捷键）、`ipc.ts`（`runSkillPipeline`：截屏 → `MiraConversation.nextTurn()` → `coach:result` 发 `UniversalOutput`；`conversationReset`/`panelHide`/`onDeactivate` IPC 通道）、`preload.ts`（contextBridge）。
+- **Shared**：`src/shared/`——跨进程类型：
+  - `ipc.ts`——`CHANNELS` + `UniversalOutput` + `UniversalItem` + `WakeRuntime` + `Capabilities`。
+  - `conv-state.ts`——连续对话状态机：`ConvState`（idle / listening / thinking / speaking）+ `ConvEvent` + `nextConvState()` 纯函数。
+- **Renderer (UI)**：`src/renderer/`——HUD 满高侧栏 + 本地唤醒词 + 连续对话 UI：
+  - `hud.ts`（主入口，esbuild 打包到 `dist/renderer/hud.js`，**字段驱动渲染** `UniversalOutput`；消费 `conv-state.ts` 状态机驱动对话流 UI，含对话历史 transcript + 输入坞 + 新对话/收起按钮）
   - `openwakeword.ts`（ONNX 三段推理管线，忠实复刻官方流式实现）
-  - `wakeword.ts`（WebVoiceProcessor 订阅 + 唤醒回调）
+  - `wakeword.ts`（WebVoiceProcessor 订阅 + 唤醒回调，IDLE 状态的声学唤醒机制）
   - `vad.ts`（纯 TS RMS VAD，silence↔speaking 状态机）
   - `wav.ts`（Float32 PCM → pcm16 WAV 编码）
   - `hud.html`/`hud.css`
 
 依赖方向红线（机械强制，见 `src/test/architecture.test.ts`）：
-- `renderer/` 可 import npm 包（onnxruntime-web / @picovoice/web-voice-processor）与 `../shared/ipc.ts`，但不得 import `../core/*` `../modules/*` `../main/*`（只能用 `window.zuiti`），也不得用 `require(`。
+- `renderer/` 可 import npm 包（onnxruntime-web / @picovoice/web-voice-processor）与 `../shared/ipc.ts`、`../shared/conv-state.ts`，但不得 import `../core/*` `../modules/*` `../main/*`（只能用 `window.zuiti`），也不得用 `require(`。
 - `modules/` 不得 import `main/` 或 `renderer/`。
 - `core/` 不得 import `modules/`/`main/`/`renderer/`。
 
@@ -136,25 +140,26 @@ src/
 │   ├── emit-tool.ts       # createEmitTool —— emit_result 工具工厂（TypeBox schema）
 │   ├── log.ts             # 结构化日志（LLM 可读 JSON lines）+ RunSummary（logs/runs/<runId>.json）
 │   ├── voice.ts           # MiMo ASR/TTS 客户端 + parseDataUrl/mimeToAudioMime
-│   ├── screenshot.ts      # 截屏（Electron desktopCapturer 动态 import）
-│   └── wakeword.ts        # containsWakeWord 文本判定（耳听八方模式用）
+│   └── screenshot.ts      # 截屏（Electron desktopCapturer 动态 import）
 ├── modules/               # 嘴替 session + skill 流水线
 │   ├── mira/
 │   │   ├── prompt.ts      # MIRA_SYSTEM_PROMPT（嘴替人格）+ skillsDir()
-│   │   └── session.ts     # createMiraSession（单 pi session 组装）
-│   └── skill-runner.ts    # runSkill（流式蹦字 + 首句 TTS + 组装 UniversalOutput + RunSummary）
+│   │   ├── session.ts     # createMiraSession（单 pi session 组装）
+│   │   └── conversation.ts  # MiraConversation —— 持久 pi session 多轮记忆容器（nextTurn/reset）
+│   └── skill-runner.ts    # runSkill（流式蹦字 + 首句 TTS + 组装 UniversalOutput + RunSummary）；导出 RunSkillCallbacks/RunSkillResult
 ├── shared/
-│   └── ipc.ts             # CHANNELS + UniversalOutput + UniversalItem + WakeRuntime + Capabilities
+│   ├── ipc.ts             # CHANNELS + UniversalOutput + UniversalItem + WakeRuntime + Capabilities
+│   └── conv-state.ts      # 连续对话状态机：ConvState(idle/listening/thinking/speaking) + nextConvState()
 ├── main/                  # Electron 主进程
 │   ├── index.ts           # app 生命周期 + 唤醒词模型下发 + 麦克风权限
-│   ├── window.ts          # HUD 浮窗（无框侧贴，loadFile dist/renderer/hud.html）
+│   ├── window.ts          # HUD 满高右侧常驻浮窗（置顶，toggle 收起）
 │   ├── tray.ts            # 托盘 + 全局快捷键
-│   ├── ipc.ts             # runSkillPipeline（截屏 → runSkill → coach:result 发 UniversalOutput）
+│   ├── ipc.ts             # runSkillPipeline（截屏 → MiraConversation.nextTurn → coach:result 发 UniversalOutput）；conversationReset/panelHide/onDeactivate IPC 通道
 │   └── preload.ts         # contextBridge → window.zuiti
-├── renderer/              # HUD 浮窗 + 本地唤醒词（esbuild 打包到 dist/renderer/hud.js）
-│   ├── hud.ts             # 主入口（字段驱动渲染 UniversalOutput）
+├── renderer/              # HUD 满高侧栏 + 本地唤醒词（esbuild 打包到 dist/renderer/hud.js）
+│   ├── hud.ts             # 主入口（字段驱动渲染 UniversalOutput；conv-state 状态机驱动对话流 UI）
 │   ├── openwakeword.ts    # ONNX 三段推理管线（melspec → embedding → hey_jarvis）
-│   ├── wakeword.ts        # WebVoiceProcessor 订阅 + 唤醒回调
+│   ├── wakeword.ts        # WebVoiceProcessor 订阅 + 唤醒回调（IDLE 声学唤醒）
 │   ├── vad.ts             # 纯 TS RMS VAD（silence↔speaking 状态机）
 │   ├── wav.ts             # Float32 PCM → pcm16 WAV 编码
 │   ├── hud.html

@@ -25,12 +25,13 @@
 
 | | 特性 | 说明 |
 |---|---|---|
-| 🛸 | **托盘常驻 + 侧贴浮窗** | 召唤即用，用完即隐，不打断你正在做的事 |
+| 🛸 | **托盘常驻 + 满高侧栏** | 满高右侧常驻悬浮、置顶，toggle 可收起，召唤即用，不打断你正在做的事 |
 | 🎙️ | **三种唤醒方式** | 托盘点击 / 全局快捷键 / 语音「Jarvis」 |
 | 🔒 | **本地离线唤醒词** | 基于 [openWakeWord](https://github.com/dscripka/openWakeWord) 的 ONNX 推理，**完全本地、离线、零 API Key、不持续传云端**——隐私向技术亮点 |
 | 👀 | **自动看屏懂上下文** | 召唤时截屏一次，喂给多模态 LLM，它知道你在跟谁聊、聊到哪、什么气氛。**不做持续监视主动弹窗** |
 | 🗣️ | **语音说真心话** | ASR 转写你的口语化输入（带情绪、中文、甚至脏话都行） |
 | ⚡ | **流式蹦字 + 首句先播 TTS** | 主体回复走 session 级文本流式（pi `text_delta`，不绑字段名），首句一出就先念，结构化备选随后补上 |
+| 🔄 | **连续多轮语音对话** | TTS 结束自动重开麦、10s 无人开口收麦待唤醒、多轮记忆（`MiraConversation` 持久 session），上下文跨轮保留 |
 | 🎨 | **多风格备选** | 推荐一条 + 2-3 条带风格标签的备选（更撩 / 更刚 / 更稳 / 更专业 / 英文），一键复制 |
 | 🤚 | **VAD 自动停止录音** | 纯 TS RMS 能量检测，说完自动停，不用手按 |
 | 🧩 | **Skill 扩展底座** | 今天替你撩 / 怂 / 跟老板说话；明天能写小红书文案、跟客服 battle、解读阴阳怪气 |
@@ -145,11 +146,11 @@ CI：push / PR 到 main 时自动跑 typecheck + test（`.github/workflows/ci.ym
 
 ```
 src/
-├── core/              # harness 底座（provider/mira-model/emit-tool/voice/screenshot/wakeword/log）
-├── modules/           # 嘴替单 session（mira/）+ skill-runner（流式 + 组装 UniversalOutput）
-├── main/              # Electron 主进程（窗口/托盘/IPC/唤醒词模型下发）
-├── renderer/          # HUD 浮窗 + 本地 openWakeWord 唤醒（esbuild 打包，字段驱动渲染）
-├── shared/ipc.ts      # IPC 契约（CHANNELS + UniversalOutput + WakeRuntime + Capabilities）
+├── core/              # harness 底座（provider/mira-model/emit-tool/voice/screenshot/log）
+├── modules/           # 嘴替单 session（mira/：session + conversation 多轮记忆）+ skill-runner（流式 + 组装 UniversalOutput）
+├── main/              # Electron 主进程（满高侧栏窗口/托盘/IPC/唤醒词模型下发）
+├── renderer/          # HUD 满高侧栏 + 本地 openWakeWord 唤醒（esbuild 打包，字段驱动渲染，对话流 UI）
+├── shared/            # IPC 契约（ipc.ts）+ 连续对话状态机（conv-state.ts）
 └── test/              # node:test（含 architecture.test.ts 架构 lint）
 skills/                # Agent Skills：reply / explain / summarize（每个一个 SKILL.md，渐进式披露）
 ```
