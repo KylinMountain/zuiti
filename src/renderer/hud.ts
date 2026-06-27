@@ -1,5 +1,5 @@
 // 嘴替 HUD 渲染逻辑 —— 赛博霓虹版
-// 监听 IPC、渲染卡片、点即复制、TTS 播放、点一下说话（VAD 自动停）。
+// 监听 IPC、渲染对话流气泡、点即复制、TTS 播放、连续对话模式。
 // 通过 window.zuiti（preload 暴露）与主进程通信。
 // esbuild 把本文件打包成 dist/renderer/hud.js（ESM）。
 /* global window, document, AudioContext, navigator, MediaRecorder, Blob, DataView, Uint8Array, ArrayBuffer, btoa, AnalyserNode, atob */
@@ -76,7 +76,6 @@ document.querySelectorAll('.scene-chip').forEach((btn) => {
     const prompt = (btn as HTMLElement).dataset.prompt ?? '';
     $text.value = prompt;
     $text.focus();
-    // Select all text so user can easily modify
     $text.select();
   });
 });
@@ -102,23 +101,96 @@ const $go = document.getElementById('go') as HTMLButtonElement;
 const $mic = document.getElementById('mic') as HTMLButtonElement;
 const $micLabel = $mic.querySelector('.mic-btn__label') as HTMLElement;
 const $voiceState = document.getElementById('voiceState') as HTMLElement;
-const $status = document.getElementById('status') as HTMLElement;
-const $thinkingText = document.getElementById('thinkingText') as HTMLElement;
-const $output = document.getElementById('output') as HTMLElement;
-const $outTitle = document.getElementById('outTitle') as HTMLElement;
-const $outPrimary = document.getElementById('outPrimary') as HTMLElement;
-const $outItems = document.getElementById('outItems') as HTMLElement;
-const $outNote = document.getElementById('outNote') as HTMLElement;
 const $screenshot = document.getElementById('screenshot') as HTMLInputElement;
-const $vadAuto = document.getElementById('vadAuto') as HTMLInputElement;
-const $wakeListen = document.getElementById('wakeListen') as HTMLInputElement;
 const $avatar = document.getElementById('avatar') as HTMLElement;
 const $moodText = document.getElementById('moodText') as HTMLElement;
 const $wave = document.getElementById('wave') as HTMLElement;
-const $screenshotPreview = document.getElementById('screenshotPreview') as HTMLElement;
-const $screenshotImg = document.getElementById('screenshotImg') as HTMLImageElement;
 
 const avatarFace = $avatar.querySelector('.avatar') as HTMLElement;
+
+// ============ 对话流 transcript ============
+const $transcript = document.getElementById('transcript') as HTMLElement;
+const $transcriptEmpty = document.getElementById('transcriptEmpty') as HTMLElement;
+let $curAssistantText: HTMLElement | null = null; // 当前流式中的嘴替气泡正文
+
+function hideEmptyState(): void { $transcriptEmpty.hidden = true; }
+function scrollToBottom(): void { $transcript.scrollTop = $transcript.scrollHeight; }
+
+function appendUserTurn(text: string): void {
+  hideEmptyState();
+  const el = document.createElement('div');
+  el.className = 'bubble bubble--user';
+  el.textContent = text;
+  $transcript.appendChild(el);
+  scrollToBottom();
+}
+
+/** 首轮截图缩略（仅本次对话首轮）。 */
+function appendScreenshotThumb(dataUrl: string): void {
+  hideEmptyState();
+  const el = document.createElement('div');
+  el.className = 'shot-thumb';
+  const img = document.createElement('img');
+  img.src = dataUrl; img.alt = '屏幕快照';
+  el.appendChild(img);
+  $transcript.appendChild(el);
+  scrollToBottom();
+}
+
+function startAssistantTurn(): void {
+  hideEmptyState();
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble bubble--assistant';
+  const p = document.createElement('p');
+  p.className = 'bubble__text';
+  const cur = document.createElement('span'); cur.className = 'cursor';
+  p.appendChild(cur);
+  wrap.appendChild(p);
+  $transcript.appendChild(wrap);
+  $curAssistantText = p;
+  scrollToBottom();
+}
+
+function updateAssistantStream(primarySoFar: string): void {
+  if (!$curAssistantText) startAssistantTurn();
+  const p = $curAssistantText!;
+  p.textContent = primarySoFar;
+  const c = document.createElement('span'); c.className = 'cursor';
+  p.appendChild(c);
+  scrollToBottom();
+}
+
+/** 收尾本轮：定稿正文 + 候选卡片 + note/title。 */
+function finishAssistantTurn(dto: UniversalOutput): void {
+  if (!$curAssistantText) startAssistantTurn();
+  const wrap = $curAssistantText!.closest('.bubble--assistant') as HTMLElement;
+  const plan = buildRenderPlan(dto);
+  $curAssistantText!.textContent = plan.primaryText; // 去光标
+  if (plan.titleVisible) {
+    const t = document.createElement('div'); t.className = 'bubble__title'; t.textContent = plan.titleText;
+    wrap.insertBefore(t, wrap.firstChild);
+  }
+  if (plan.items.length) {
+    const list = document.createElement('div'); list.className = 'reply-list';
+    for (const it of plan.items) {
+      const item = document.createElement('div'); item.className = 'reply-item';
+      if (it.label) { const tag = document.createElement('div'); tag.className = 'reply-item__tag'; tag.textContent = it.label; item.appendChild(tag); }
+      const tx = document.createElement('p'); tx.className = 'reply-item__text'; tx.textContent = it.text; item.appendChild(tx);
+      if (it.copyable) { const b = document.createElement('button'); b.className = 'reply-item__copy'; b.textContent = '复制'; bindCopy(b, it.text); item.appendChild(b); }
+      list.appendChild(item);
+    }
+    wrap.appendChild(list);
+  }
+  if (plan.noteVisible) { const n = document.createElement('p'); n.className = 'bubble__note'; n.textContent = plan.noteText; wrap.appendChild(n); }
+  $curAssistantText = null;
+  scrollToBottom();
+}
+
+function clearTranscript(): void {
+  $transcript.querySelectorAll('.bubble, .shot-thumb').forEach((n) => n.remove());
+  $transcriptEmpty.hidden = false;
+  $curAssistantText = null;
+}
 
 // ============ 头像表情状态 ============
 function setAvatarState(state: 'idle' | 'thinking' | 'talking'): void {
@@ -173,6 +245,7 @@ function applyEvent(event: ConvEvent): void {
       clearNoSpeechTimer();
       if (recording) stopRecording(false);
       setHeaderState('idle');
+      $voiceState.hidden = true;
       void ensureWakeWord();
       break;
     case 'listening':
@@ -202,24 +275,15 @@ function ensureAudioCtx(): AudioContext {
 }
 
 // ============ 发起请求 ============
-const THINKING_MOODS = [
-  '嘴替正在酝酿大招…',
-  '脑暴中，稍等…',
-  '正在组织嘴炮语言…',
-  '灵感来了，马上好！',
-];
-
 function runCoach(): void {
   const text = $text.value.trim();
   if (!text) return;
   rlog('info', 'coach.run', { textLen: text.length, withScreenshot: !!$screenshot?.checked });
   $go.disabled = true;
-  $output.hidden = true;
-  $status.hidden = false;
-  $thinkingText.textContent = THINKING_MOODS[Math.floor(Math.random() * THINKING_MOODS.length)];
-  setAvatarState('thinking');
-  setMood('思考中…');
-  const withScreenshot = $screenshot && $screenshot.checked;
+  appendUserTurn(text);
+  $text.value = '';
+  const withScreenshot = ($screenshot && $screenshot.checked) || firstTurnPending;
+  if (withScreenshot) firstTurnPending = false;
   api.runCoach(text, withScreenshot, currentStyle);
 }
 
@@ -250,7 +314,8 @@ function setRecordingState(on: boolean): void {
     $voiceState.textContent = '听你说…说完自动发';
   } else {
     $mic.classList.remove('mic-btn--recording');
-    $micLabel.textContent = '点一下开喷';
+    $micLabel.textContent = '说';
+    // voiceState hidden is managed by applyEvent('idle') or stays until ASR resolves
   }
 }
 
@@ -370,97 +435,54 @@ $mic.addEventListener('click', () => {
   }
 });
 
+// ============ 新对话 / 收起 / 再看屏 按钮 ============
+const $newConvBtn = document.getElementById('newConvBtn') as HTMLButtonElement;
+const $collapseBtn = document.getElementById('collapseBtn') as HTMLButtonElement;
+const $relookBtn = document.getElementById('relookBtn') as HTMLButtonElement;
+
+$newConvBtn?.addEventListener('click', () => {
+  api.resetConversation();
+  clearTranscript();
+  firstTurnPending = true;
+});
+
+$collapseBtn?.addEventListener('click', () => { api.hidePanel(); });
+
+$relookBtn?.addEventListener('click', () => {
+  // 「再看一次屏」：下一轮强制带截图（无论首轮与否）
+  firstTurnPending = true;
+  // 若用户已有文字则直接发；否则进 listening 让其说话
+  if ($text.value.trim()) {
+    appendUserTurn($text.value.trim());
+    api.runCoach($text.value.trim(), true, currentStyle);
+    $text.value = '';
+  } else {
+    applyEvent('wake');
+  }
+});
+
 // ============ IPC 监听 ============
 
-api.onLoading(() => {
-  $status.hidden = false;
-  $output.hidden = true;
-  $screenshotPreview?.setAttribute('hidden', '');
-  setAvatarState('thinking');
-  setMood('思考中…');
-});
+api.onTranscript((text) => { appendUserTurn(text); });
 
-// Screenshot preview
-api.onScreenshot((dataUrl) => {
-  $screenshotImg.src = dataUrl;
-  $screenshotPreview.hidden = false;
-});
+api.onScreenshot((dataUrl) => { appendScreenshotThumb(dataUrl); });
 
-// 流式 reply 蹦字
-api.onReplyChunk((primarySoFar) => {
-  if ($output.hidden) {
-    $status.hidden = true;
-    $output.hidden = false;
-    $outTitle.hidden = true;
-    $outItems.innerHTML = '';
-    $outNote.hidden = true;
-    setAvatarState('talking');
-    setMood('正在输出…');
-  }
-  renderPrimaryWithCursor(primarySoFar, true);
-});
+api.onLoading(() => { startAssistantTurn(); });
 
-function renderPrimaryWithCursor(text: string, streaming: boolean): void {
-  const cursor = $outPrimary.querySelector('.cursor');
-  $outPrimary.textContent = text;
-  if (streaming && text.length > 0) {
-    const c = document.createElement('span');
-    c.className = 'cursor';
-    $outPrimary.appendChild(c);
-  } else if (cursor) {
-    cursor.remove();
-  }
-}
+api.onReplyChunk((primarySoFar) => { updateAssistantStream(primarySoFar); });
 
-// 字段驱动通用渲染
 api.onResult((dto) => {
-  $status.hidden = true;
-  $voiceState.hidden = true;
+  finishAssistantTurn(dto);
   $go.disabled = false;
-  $screenshotPreview?.setAttribute('hidden', '');
-  setAvatarState('idle');
-  setMood('搞定，挑一条发！');
-
-  const plan = buildRenderPlan(dto);
-  $outTitle.textContent = plan.titleText;
-  $outTitle.hidden = !plan.titleVisible;
-
-  renderPrimaryWithCursor(plan.primaryText, false);
-
-  $outItems.innerHTML = '';
-  for (const it of plan.items) {
-    const item = document.createElement('div');
-    item.className = 'reply-item';
-    const tag = it.label ? `<div class="reply-item__tag">${escapeHtml(it.label)}</div>` : '';
-    const copy = it.copyable ? '<button class="reply-item__copy">复制</button>' : '';
-    item.innerHTML = tag + `<p class="reply-item__text"></p>` + copy;
-    (item.querySelector('.reply-item__text') as HTMLElement).textContent = it.text;
-    if (it.copyable) bindCopy(item.querySelector('.reply-item__copy') as HTMLButtonElement, it.text);
-    $outItems.appendChild(item);
-  }
-
-  $outNote.textContent = plan.noteText;
-  $outNote.hidden = !plan.noteVisible;
-
-  $output.hidden = false;
+  $voiceState.hidden = true;
 });
 
 api.onError((msg) => {
-  $status.hidden = true;
-  $voiceState.hidden = true;
+  updateAssistantStream('出错了：' + msg);
+  finishAssistantTurn({ primary: { text: '出错了：' + msg }, items: [] });
   $go.disabled = false;
-  setAvatarState('idle');
-  setMood('啊哦，出错了');
-  $outTitle.hidden = true;
-  renderPrimaryWithCursor('出错了：' + msg, false);
-  $outItems.innerHTML = '';
-  $outNote.hidden = true;
-  $output.hidden = false;
+  $voiceState.hidden = true;
   applyEvent('turnError');
-});
-
-api.onTranscript((text) => {
-  $text.value = text;
 });
 
 api.onVoiceError((msg) => {
@@ -541,11 +563,6 @@ void api.capabilities().then(async (caps) => {
     setTimeout(() => { $voiceState.hidden = true; }, 2000);
   } else {
     rlog('warn', 'wakeword.disabled', { reason: 'no wake runtime' });
-    if ($wakeListen) {
-      $wakeListen.disabled = true;
-      const label = $wakeListen.closest('label');
-      if (label) label.title = '未启用：运行 npm run fetch-models 下载 openWakeWord 模型';
-    }
   }
 });
 
@@ -570,15 +587,6 @@ function bindCopy(btn: HTMLButtonElement, text: string): void {
       btn.classList.remove('reply-item__copy--done');
     }, 1200);
   });
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 $text.focus();
@@ -700,4 +708,13 @@ async function refreshHistory(): Promise<void> {
   } catch {
     // Ignore
   }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

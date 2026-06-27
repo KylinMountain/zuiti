@@ -18,10 +18,10 @@
     <canvas id="particles"></canvas>
   </div>
 
-  <div class="app">
-    <!-- Hero：嘴替头像 + 状态 -->
-    <header class="hero">
-      <div class="hero__avatar" id="avatar">
+  <div class="app app--sidepanel">
+    <!-- 窄头部 -->
+    <header class="topbar">
+      <div class="topbar__avatar" id="avatar">
         <div class="avatar">
           <svg class="avatar__face" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
             <!-- 脸 -->
@@ -61,33 +61,19 @@
           </svg>
         </div>
       </div>
-
-      <div class="hero__text">
-        <h1 class="hero__title">
-          <span class="hero__title-main">嘴替</span>
-          <span class="hero__title-sub" id="moodText">已就位，等你开麦</span>
-        </h1>
-        <div class="hero__status">
-          <span class="status-dot status-dot--idle"></span>
-          <span class="status-dot status-dot--listen"></span>
-          <span class="status-dot status-dot--think"></span>
-          <span class="status-dot status-dot--speak"></span>
-        </div>
+      <div class="topbar__meta">
+        <span class="topbar__title">嘴替</span>
+        <span class="topbar__status" id="moodText">待唤醒 · 喊我「Jarvis」</span>
       </div>
-
-      <!-- 说话波形 -->
-      <div class="wave" id="wave" hidden>
-        <span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span>
-      </div>
-
-      <!-- Settings toggle -->
-      <button class="settings-btn" id="settingsBtn" type="button" title="设置">
+      <div class="wave" id="wave" hidden><span></span><span></span><span></span><span></span><span></span></div>
+      <button class="iconbtn" id="newConvBtn" type="button" title="新对话">＋</button>
+      <button class="iconbtn settings-btn" id="settingsBtn" type="button" title="设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
           <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
         </svg>
       </button>
+      <button class="iconbtn" id="collapseBtn" type="button" title="收起">⟩</button>
     </header>
 
     <!-- Settings Panel -->
@@ -134,59 +120,32 @@
           <span class="settings-item__value">0.1.0</span>
         </div>
       </div>
+
+      <!-- 历史记录（折入设置面板） -->
+      <div class="settings-panel__body">
+        <section class="history-section" id="historySection">
+          <button class="history-toggle" id="historyToggle" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span>历史记录</span>
+            <span class="history-count" id="historyCount"></span>
+            <svg class="history-toggle__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="history-list" id="historyList" hidden></div>
+          <div class="history-empty" id="historyEmpty">
+            <span>暂无记录</span>
+          </div>
+          <button class="history-clear" id="historyClear" type="button" hidden>清除全部</button>
+        </section>
+      </div>
     </aside>
 
-    <!-- 历史记录 -->
-    <section class="history-section" id="historySection">
-      <button class="history-toggle" id="historyToggle" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polyline points="12 6 12 12 16 14"></polyline>
-        </svg>
-        <span>历史记录</span>
-        <span class="history-count" id="historyCount"></span>
-        <svg class="history-toggle__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-      </button>
-      <div class="history-list" id="historyList" hidden></div>
-      <div class="history-empty" id="historyEmpty">
-        <span>暂无记录</span>
-      </div>
-      <button class="history-clear" id="historyClear" type="button" hidden>清除全部</button>
-    </section>
-
-    <!-- 风格切换器 -->
-    <section class="style-bar">
-      <div class="style-bar__pills" id="stylePills"></div>
-    </section>
-
-    <!-- 输入区 -->
-    <section class="input-zone">
-      <div class="input-wrap">
-        <textarea id="text" placeholder="说句真心话…想怼啥、想撩啥、想请假，尽管说" rows="2"></textarea>
-        <div class="input-actions">
-          <label class="screen-toggle">
-            <input type="checkbox" id="screenshot" checked />
-            <span class="screen-toggle__icon">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
-                <circle cx="12" cy="11" r="3" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M7 21h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-            </span>
-            <span class="screen-toggle__label">看屏</span>
-          </label>
-          <button id="go" class="fire-btn">
-            <span class="fire-btn__text">替我喷</span>
-            <span class="fire-btn__icon">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </span>
-          </button>
-        </div>
-      </div>
-
-        <!-- Quick scene shortcuts -->
+    <!-- 对话流 -->
+    <main class="transcript" id="transcript">
+      <div class="transcript__empty" id="transcriptEmpty">
+        <p>喊一声「Jarvis」，或点下面麦克风，直接开聊。</p>
         <div class="scene-shortcuts" id="sceneShortcuts">
           <button class="scene-chip" data-prompt="帮我回这条消息，高情商一点" type="button">
             <span>💘</span>恋爱救场
@@ -201,80 +160,33 @@
             <span>🌍</span>英文回复
           </button>
         </div>
-    </section>
-
-    <!-- 语音控制 -->
-    <section class="voice-bar">
-      <button id="mic" class="mic-btn" type="button">
-        <span class="mic-btn__ring"></span>
-        <span class="mic-btn__core">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" fill="currentColor"/>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M12 19v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </span>
-        <span class="mic-btn__label">点一下开喷</span>
-      </button>
-
-      <div class="voice-chips">
-        <label class="chip chip--active">
-          <input type="checkbox" id="vadAuto" checked />
-          <span>VAD 自动停</span>
-        </label>
-        <label class="chip chip--wake">
-          <input type="checkbox" id="wakeListen" />
-          <span>耳听八方</span>
-        </label>
       </div>
+    </main>
 
-      <!-- Screenshot preview -->
-      <div class="screenshot-preview" id="screenshotPreview" hidden>
-        <img class="screenshot-preview__img" id="screenshotImg" alt="截屏预览" />
-        <span class="screenshot-preview__label">正在分析屏幕…</span>
+    <!-- 底部输入坞 -->
+    <footer class="dock">
+      <div class="style-bar"><div class="style-bar__pills" id="stylePills"></div></div>
+      <div class="input-wrap">
+        <textarea id="text" placeholder="说句真心话…想怼啥、想撩啥、想请假，尽管说" rows="2"></textarea>
       </div>
-    </section>
-
-    <div id="voiceState" class="voice-state" hidden></div>
-
-    <!-- 加载：嘴替正在酝酿 -->
-    <section id="status" class="thinking" hidden>
-      <div class="thinking__bubbles">
-        <span>💭</span>
-        <span>🔥</span>
-        <span>⚡</span>
+      <div class="dock__actions">
+        <label class="screen-toggle"><input type="checkbox" id="screenshot" checked /><span class="screen-toggle__label">看屏</span></label>
+        <button class="iconbtn" id="relookBtn" type="button" title="再看一次屏">👀再看</button>
+        <button id="mic" class="mic-btn" type="button">
+          <span class="mic-btn__ring"></span>
+          <span class="mic-btn__core">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" fill="currentColor"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M12 19v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="mic-btn__label">说</span>
+        </button>
+        <button id="go" class="fire-btn"><span class="fire-btn__text">发</span></button>
       </div>
-      <p class="thinking__text">
-        <span id="thinkingText">嘴替正在酝酿大招…</span>
-        <span class="dots"><i>.</i><i>.</i><i>.</i></span>
-      </p>
-    </section>
-
-    <!-- 输出区 -->
-    <section id="output" class="output" hidden>
-      <h3 id="outTitle" class="output__title" hidden></h3>
-
-      <!-- 主回复（大卡片） -->
-      <div class="reply-card reply-card--primary">
-        <div class="reply-card__glow"></div>
-        <div class="reply-card__corner reply-card__corner--tl"></div>
-        <div class="reply-card__corner reply-card__corner--br"></div>
-        <div class="reply-card__badge">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z" fill="currentColor"/>
-          </svg>
-          <span>主打回复</span>
-        </div>
-        <p id="outPrimary" class="reply-card__text">
-          <span class="cursor"></span>
-        </p>
-      </div>
-
-      <!-- 备选 -->
-      <div id="outItems" class="reply-list"></div>
-
-      <p id="outNote" class="output__note" hidden></p>
-    </section>
+      <div id="voiceState" class="voice-state" hidden></div>
+    </footer>
   </div>
 
   <script>
