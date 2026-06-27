@@ -248,12 +248,9 @@ function setRecordingState(on: boolean): void {
     $micLabel.textContent = '喷就完了…';
     $voiceState.hidden = false;
     $voiceState.textContent = '听你说…说完自动发';
-    setAvatarState('talking');
-    setMood('听你说…');
   } else {
     $mic.classList.remove('mic-btn--recording');
     $micLabel.textContent = '点一下开喷';
-    setAvatarState('idle');
   }
 }
 
@@ -366,8 +363,10 @@ function bytesToBase64(bytes: Uint8Array): string {
 $mic.addEventListener('click', () => {
   if (recording) {
     stopRecording(false);
-  } else {
-    void startRecording();
+    applyEvent('speechEnd');
+  } else if (convState === 'idle' || convState === 'listening') {
+    if (convState === 'idle') firstTurnPending = true;
+    applyEvent('wake');
   }
 });
 
@@ -495,7 +494,7 @@ api.onTtsDone(() => {
   applyEvent('ttsDone');
 });
 
-// 唤醒词命中时，如果耳听八方开着，先停掉它，避免和录音抢麦克风
+// openWakeWord 停止函数（null = 未启动 / 已停止）
 let stopWakeWordFn: (() => Promise<void>) | null = null;
 
 async function ensureWakeWord(): Promise<void> {
