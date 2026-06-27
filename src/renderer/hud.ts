@@ -449,14 +449,17 @@ $newConvBtn?.addEventListener('click', () => {
 $collapseBtn?.addEventListener('click', () => { api.hidePanel(); });
 
 $relookBtn?.addEventListener('click', () => {
-  // 「再看一次屏」：下一轮强制带截图（无论首轮与否）
-  firstTurnPending = true;
-  // 若用户已有文字则直接发；否则进 listening 让其说话
   if ($text.value.trim()) {
-    appendUserTurn($text.value.trim());
-    api.runCoach($text.value.trim(), true, currentStyle);
+    // 直接带截图发一轮：本轮看屏，下一轮不再自动看屏
+    firstTurnPending = false;
+    const t = $text.value.trim();
+    appendUserTurn(t);
+    $go.disabled = true;
+    api.runCoach(t, true, currentStyle);
     $text.value = '';
   } else {
+    // 没有文字：让下一句语音轮带截图
+    firstTurnPending = true;
     applyEvent('wake');
   }
 });
