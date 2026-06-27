@@ -23,9 +23,9 @@ Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
 - **Modules**：`src/modules/`——嘴替 session + skill 流水线：
   - `mira/prompt.ts`——`MIRA_SYSTEM_PROMPT`（嘴替人格，替换 pi 默认 coding prompt）+ `skillsDir()`。
   - `mira/session.ts`——`createMiraSession`：组装单个 pi session（关 thinking MiMo + system prompt + skills 披露 + `tools:['read','emit_result']`）。
-  - `mira/conversation.ts`——`MiraConversation`：多轮记忆容器，持久化 pi session 跨轮复用，`nextTurn()` 追加上下文，`reset()` 开新对话。
+  - `mira/conversation.ts`——`MiraConversation`：多轮记忆容器，持久化 pi session 跨轮复用，`sendTurn()` 追加上下文，`reset()` 开新对话。
   - `skill-runner.ts`——`runSkill`：跑 session、订阅文本流式蹦字 + 首句 TTS、收 `emit_result`、组装 `UniversalOutput`、写 `RunSummary`；同时导出 `RunSkillCallbacks`/`RunSkillResult` 供 `MiraConversation` 复用。
-- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期 + 唤醒词模型下发 + 麦克风权限）、`window.ts`（HUD 满高右侧常驻浮窗，置顶，toggle 收起）、`tray.ts`（托盘 + 快捷键）、`ipc.ts`（`runSkillPipeline`：截屏 → `MiraConversation.nextTurn()` → `coach:result` 发 `UniversalOutput`；`conversationReset`/`panelHide`/`onDeactivate` IPC 通道）、`preload.ts`（contextBridge）。
+- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期 + 唤醒词模型下发 + 麦克风权限）、`window.ts`（HUD 满高右侧常驻浮窗，置顶，toggle 收起）、`tray.ts`（托盘 + 快捷键）、`ipc.ts`（`runSkillPipeline`：截屏 → `MiraConversation.sendTurn()` → `coach:result` 发 `UniversalOutput`；`conversationReset`/`panelHide`/`onDeactivate` IPC 通道）、`preload.ts`（contextBridge）。
 - **Shared**：`src/shared/`——跨进程类型：
   - `ipc.ts`——`CHANNELS` + `UniversalOutput` + `UniversalItem` + `WakeRuntime` + `Capabilities`。
   - `conv-state.ts`——连续对话状态机：`ConvState`（idle / listening / thinking / speaking）+ `ConvEvent` + `nextConvState()` 纯函数。
@@ -145,16 +145,17 @@ src/
 │   ├── mira/
 │   │   ├── prompt.ts      # MIRA_SYSTEM_PROMPT（嘴替人格）+ skillsDir()
 │   │   ├── session.ts     # createMiraSession（单 pi session 组装）
-│   │   └── conversation.ts  # MiraConversation —— 持久 pi session 多轮记忆容器（nextTurn/reset）
+│   │   └── conversation.ts  # MiraConversation —— 持久 pi session 多轮记忆容器（sendTurn/reset）
 │   └── skill-runner.ts    # runSkill（流式蹦字 + 首句 TTS + 组装 UniversalOutput + RunSummary）；导出 RunSkillCallbacks/RunSkillResult
 ├── shared/
 │   ├── ipc.ts             # CHANNELS + UniversalOutput + UniversalItem + WakeRuntime + Capabilities
-│   └── conv-state.ts      # 连续对话状态机：ConvState(idle/listening/thinking/speaking) + nextConvState()
+│   ├── conv-state.ts      # 连续对话状态机：ConvState(idle/listening/thinking/speaking) + nextConvState()
+│   └── render-plan.ts     # UniversalOutput → 渲染计划纯函数（字段驱动渲染）
 ├── main/                  # Electron 主进程
 │   ├── index.ts           # app 生命周期 + 唤醒词模型下发 + 麦克风权限
 │   ├── window.ts          # HUD 满高右侧常驻浮窗（置顶，toggle 收起）
 │   ├── tray.ts            # 托盘 + 全局快捷键
-│   ├── ipc.ts             # runSkillPipeline（截屏 → MiraConversation.nextTurn → coach:result 发 UniversalOutput）；conversationReset/panelHide/onDeactivate IPC 通道
+│   ├── ipc.ts             # runSkillPipeline（截屏 → MiraConversation.sendTurn → coach:result 发 UniversalOutput）；conversationReset/panelHide/onDeactivate IPC 通道
 │   └── preload.ts         # contextBridge → window.zuiti
 ├── renderer/              # HUD 满高侧栏 + 本地唤醒词（esbuild 打包到 dist/renderer/hud.js）
 │   ├── hud.ts             # 主入口（字段驱动渲染 UniversalOutput；conv-state 状态机驱动对话流 UI）
