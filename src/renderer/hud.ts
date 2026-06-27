@@ -309,6 +309,7 @@ let analyser: AnalyserNode | null = null;
 let vad: VadDetector | null = null;
 let vadTimer: ReturnType<typeof setInterval> | null = null;
 let vadPendingStart = false;
+let discardRecording = false;
 
 function setRecordingState(on: boolean): void {
   recording = on;
@@ -393,6 +394,12 @@ function stopRecording(autoMode = false): void {
 }
 
 async function handleRecordingStop(): Promise<void> {
+  if (discardRecording) {
+    discardRecording = false;
+    audioChunks = [];
+    rlog('info', 'mic.discard');
+    return;
+  }
   rlog('info', 'mic.stop', { chunks: audioChunks.length });
   if (audioChunks.length === 0) {
     rlog('warn', 'mic.stop.empty');
@@ -475,7 +482,14 @@ api.onTranscript((text) => { appendUserTurn(text); });
 
 api.onScreenshot((dataUrl) => { appendScreenshotThumb(dataUrl); });
 
-api.onLoading(() => { startAssistantTurn(); });
+api.onLoading(() => {
+  if (convState === 'listening') {
+    discardRecording = true;
+    stopRecording(false);     // 关麦但因 discardRecording 不会送 ASR
+    applyEvent('speechEnd');  // listening → thinking
+  }
+  startAssistantTurn();
+});
 
 api.onReplyChunk((primarySoFar) => { updateAssistantStream(primarySoFar); });
 

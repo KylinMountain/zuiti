@@ -17,7 +17,7 @@ export type ConvEvent =
 const TABLE: Record<ConvState, Partial<Record<ConvEvent, ConvState>>> = {
   idle: { wake: 'listening' },
   listening: { speechStart: 'listening', speechEnd: 'thinking', noSpeechTimeout: 'idle', reset: 'idle' },
-  thinking: { ttsStart: 'speaking', turnError: 'listening', reset: 'idle' },
+  thinking: { ttsStart: 'speaking', ttsDone: 'listening', turnError: 'listening', reset: 'idle' },
   speaking: { ttsDone: 'listening', reset: 'idle' },
 };
 

@@ -97,12 +97,17 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     }
 
     try {
+      let ttsStartedThisTurn = false;
       const { output, summary } = await getConversation().sendTurn(text, screenshotDataUrl, {
         onReplyChunk: (reply) => mainWindow.webContents.send(CHANNELS.coachReplyChunk, reply),
-        onTtsStart: (firstSentence) => startTtsStream(firstSentence, mainWindow),
+        onTtsStart: (firstSentence) => { ttsStartedThisTurn = true; startTtsStream(firstSentence, mainWindow); },
         style,
       });
       mainWindow.webContents.send(CHANNELS.coachResult, output);
+      if (!ttsStartedThisTurn) {
+        // 本轮没有可播报文本（纯候选 / 空 primary）：补发 ttsDone，让渲染层状态机从 thinking 回流 listening
+        mainWindow.webContents.send(CHANNELS.voiceTtsDone);
+      }
 
       // Append to history
       try {

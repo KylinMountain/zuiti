@@ -32,3 +32,6 @@ test('未定义转换：保持原状态', () => {
   assert.equal(nextConvState('idle', 'ttsDone'), 'idle');
   assert.equal(nextConvState('speaking', 'wake'), 'speaking');
 });
+test('TTS 无音频块时 thinking 也能回流 listening（不卡死）', () => {
+  assert.equal(nextConvState('thinking', 'ttsDone'), 'listening');
+});
