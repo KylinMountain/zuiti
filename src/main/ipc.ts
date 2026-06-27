@@ -97,17 +97,17 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     }
 
     try {
-      let ttsStartedThisTurn = false;
       const { output, summary } = await getConversation().sendTurn(text, screenshotDataUrl, {
         onReplyChunk: (reply) => mainWindow.webContents.send(CHANNELS.coachReplyChunk, reply),
-        onTtsStart: (firstSentence) => { ttsStartedThisTurn = true; startTtsStream(firstSentence, mainWindow); },
+        onTtsStart: (firstSentence) => startTtsStream(firstSentence, mainWindow),
         style,
       });
       mainWindow.webContents.send(CHANNELS.coachResult, output);
-      if (!ttsStartedThisTurn) {
-        // 本轮没有可播报文本（纯候选 / 空 primary）：补发 ttsDone，让渲染层状态机从 thinking 回流 listening
-        mainWindow.webContents.send(CHANNELS.voiceTtsDone);
-      }
+      // 等本轮所有 TTS 合成（首句 + 剩余）排队完，再统一发一次 ttsDone：一轮只发一次，
+      // 避免中途 ttsDone 提前重开麦 + 播放时序错乱（几段一起读）。无 TTS（纯候选/空 primary）
+      // 时队列已 resolved，立即发 done，让状态机从 thinking 回流 listening。
+      await ttsQueue;
+      mainWindow.webContents.send(CHANNELS.voiceTtsDone);
 
       // Append to history
       try {
@@ -138,7 +138,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
   /** TTS 串行队列：首句先播，剩余文本排队等播完再播，避免并发混音。 */
   let ttsQueue: Promise<void> = Promise.resolve();
 
-  /** TTS 流式合成 + 推给渲染层。失败发 ttsDone 让渲染层复位。串行排队。 */
+  /** TTS 流式合成 + 推给渲染层音频块。串行排队；ttsDone 由 runSkillPipeline 在队列排空后统一发一次。 */
   function startTtsStream(text: string, win: BrowserWindow): void {
     ttsQueue = ttsQueue.then(async () => {
       const t0 = Date.now();
@@ -148,7 +148,6 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
           chunkCount++;
           win.webContents.send(CHANNELS.voiceTtsChunk, Buffer.from(chunk).toString('base64'));
         }
-        win.webContents.send(CHANNELS.voiceTtsDone);
         log.info('coach.tts.ok', { chunks: chunkCount, tookMs: Date.now() - t0, textLen: text.length });
       } catch (err) {
         log.warn('coach.tts.failed', {
@@ -156,7 +155,6 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
           chunks: chunkCount,
           tookMs: Date.now() - t0,
         });
-        win.webContents.send(CHANNELS.voiceTtsDone);
       }
     });
   }

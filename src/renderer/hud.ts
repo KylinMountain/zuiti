@@ -516,7 +516,6 @@ api.onVoiceError((msg) => {
 
 // TTS 流式播放
 api.onTtsChunk((base64) => {
-  if (!ttsStartTime) { ttsStartTime = audioCtx ? audioCtx.currentTime : 0; applyEvent('ttsStart'); }
   const ctx = ensureAudioCtx();
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const pcm = new Int16Array(bytes.buffer);
@@ -527,15 +526,23 @@ api.onTtsChunk((base64) => {
   const src = ctx.createBufferSource();
   src.buffer = buf;
   src.connect(ctx.destination);
-  src.start(ttsStartTime);
-  ttsStartTime += buf.duration;
+  // 严格背靠背排期：从 max(已排到, 现在) 开始，绝不排进过去 → 几段 TTS（首句+剩余/多轮）不会重叠（一起读）。
+  const startAt = Math.max(ttsStartTime, ctx.currentTime);
+  src.start(startAt);
+  ttsStartTime = startAt + buf.duration;
+  if (convState === 'thinking') applyEvent('ttsStart'); // 首个音频块 → speaking
   $wave.hidden = false;
 });
 
 api.onTtsDone(() => {
-  ttsStartTime = 0;
-  $wave.hidden = true;
-  applyEvent('ttsDone');
+  // 本轮 TTS 已全部合成入队；等已排期的音频真正播完再回流（重开麦），否则会在还在说话时开麦（自己听自己）。
+  const ctx = audioCtx;
+  const waitMs = ctx ? Math.max(0, (ttsStartTime - ctx.currentTime) * 1000) : 0;
+  setTimeout(() => {
+    ttsStartTime = 0;
+    $wave.hidden = true;
+    applyEvent('ttsDone');
+  }, waitMs);
 });
 
 // openWakeWord 停止函数（null = 未启动 / 已停止）
