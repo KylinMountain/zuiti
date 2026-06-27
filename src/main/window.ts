@@ -1,6 +1,5 @@
 /**
- * HUD 浮窗 —— 无框、侧贴、常驻顶层的小面板。
- * 召唤即现、用完即隐（失焦自动隐藏）。
+ * HUD 侧栏 —— 无框、右侧满高、置顶悬浮、常驻（不失焦隐藏）。Plan 9。
  */
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
@@ -9,14 +8,13 @@ import { log } from '../core/log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const HUD_WIDTH = 380;
-const HUD_HEIGHT = 540;
+const HUD_WIDTH = 400;
+const EDGE_GAP = 0;
 
-/** 创建 HUD 浮窗（不显示，由 tray/快捷键唤起）。 */
 export function createHudWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: HUD_WIDTH,
-    height: HUD_HEIGHT,
+    height: 800, // 占位高，showHud 时按屏改满高
     frame: false,
     transparent: true,
     resizable: false,
@@ -34,40 +32,35 @@ export function createHudWindow(): BrowserWindow {
     },
   });
 
-  // esbuild 把 hud.ts 打包到 dist/renderer/hud.js，copy-assets 把 hud.html/css + onnx wasm 拷过去
   win.loadFile(join(__dirname, '..', 'renderer', 'hud.html'));
 
-  win.webContents.on('did-finish-load', () => {
-    log.info('window.loaded', { url: 'hud.html' });
-  });
-  win.webContents.on('did-fail-load', (_e, code, desc) => {
-    log.error('window.load.failed', { code, desc });
-  });
-  win.on('closed', () => {
-    log.info('window.closed');
-  });
-
-  // 失焦自动隐藏（用完即隐）
-  win.on('blur', () => {
-    log.debug('window.blur.hide');
-    win.hide();
-  });
-  win.on('show', () => {
-    log.debug('window.shown');
-  });
+  win.webContents.on('did-finish-load', () => log.info('window.loaded', { url: 'hud.html' }));
+  win.webContents.on('did-fail-load', (_e, code, desc) => log.error('window.load.failed', { code, desc }));
+  win.on('closed', () => log.info('window.closed'));
+  win.on('show', () => log.debug('window.shown'));
+  // 注意：不再失焦隐藏（去掉 win.on('blur', …)）——常驻 side 工具。
 
   return win;
 }
 
-/** 把浮窗贴到当前活动屏幕右侧居中并显示。 */
+/** 贴当前光标所在屏右侧、满高显示。 */
 export function showHud(win: BrowserWindow): void {
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
-  const { width, height } = display.workAreaSize;
-  const x = display.workArea.x + width - HUD_WIDTH - 12;
-  const y = display.workArea.y + Math.round((height - HUD_HEIGHT) / 2);
-  win.setPosition(x, y, false);
+  const { x: ax, y: ay, width, height } = display.workArea;
+  const x = ax + width - HUD_WIDTH - EDGE_GAP;
+  win.setBounds({ x, y: ay, width: HUD_WIDTH, height }, false);
   win.show();
   win.focus();
-  log.debug('window.shown.position', { x, y, display: display.id });
+  log.debug('window.shown.position', { x, y: ay, height, display: display.id });
+}
+
+/** 切换显示/隐藏。返回切换后是否可见。 */
+export function toggleHud(win: BrowserWindow): boolean {
+  if (win.isVisible()) {
+    win.hide();
+    return false;
+  }
+  showHud(win);
+  return true;
 }

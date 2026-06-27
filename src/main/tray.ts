@@ -41,7 +41,7 @@ export function createTray(onWake: () => void): Tray {
   const menu = Menu.buildFromTemplate([
     { label: '嘴替', enabled: false },
     { type: 'separator' },
-    { label: '唤起 (Cmd+Shift+J)', click: onWake },
+    { label: '显示/收起 (Cmd+Shift+J)', click: onWake },
     { type: 'separator' },
     { label: '退出', role: 'quit' },
   ]);

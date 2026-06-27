@@ -8,7 +8,7 @@ import { app, session, ipcMain, type BrowserWindow } from 'electron';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHudWindow, showHud } from './window.js';
+import { createHudWindow, showHud, toggleHud } from './window.js';
 import { createTray, destroyTray } from './tray.js';
 import { registerCoachIpc } from './ipc.js';
 import { CHANNELS, type WakeRuntime } from '../shared/ipc.js';
@@ -17,6 +17,7 @@ import { log } from '../core/log.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let hud: BrowserWindow | null = null;
+let endConversation: () => void = () => {};
 
 /** 唤醒词配置：从 models/ 读 3 个 ONNX → base64 下发给渲染层。模型缺失则返回 null（功能关闭）。 */
 function buildWakeRuntime(): WakeRuntime | null {
@@ -41,11 +42,23 @@ function buildWakeRuntime(): WakeRuntime | null {
   }
 }
 
-/** 唤醒：显示 HUD + 通知渲染层聚焦输入（panel:activate）。 */
+/** 唤醒：显示 HUD + 通知渲染层聚焦输入（panel:activate）。唤醒词/dock 始终唤起，不隐藏。 */
 function activate(): void {
   if (!hud) return;
   showHud(hud);
   hud.webContents.send(CHANNELS.onActivate);
+}
+
+/** 快捷键/托盘：toggle 显示/收起。收起即结束本次对话。 */
+function toggle(): void {
+  if (!hud) return;
+  const visible = toggleHud(hud);
+  if (visible) {
+    hud.webContents.send(CHANNELS.onActivate);
+  } else {
+    endConversation();
+    hud.webContents.send(CHANNELS.onDeactivate);
+  }
 }
 
 app.whenReady().then(() => {
@@ -66,8 +79,9 @@ app.whenReady().then(() => {
   log.info('window.created');
 
   const wake = buildWakeRuntime();
-  registerCoachIpc(hud, wake);
-  createTray(activate);
+  const coachIpc = registerCoachIpc(hud, wake);
+  endConversation = coachIpc.endConversation;
+  createTray(toggle);
   log.info('ipc.registered');
 
   // 本地唤醒词命中（渲染层 openWakeWord 检出 "Jarvis"）→ 与热键同样的唤起。
@@ -75,6 +89,15 @@ app.whenReady().then(() => {
     log.info('wake.hit');
     activate();
   });
+
+  // 渲染层「收起」按钮 → 隐藏窗口 + 结束对话 + 通知渲染层复位。
+  ipcMain.on(CHANNELS.panelHide, () => {
+    if (!hud) return;
+    hud.hide();
+    endConversation();
+    hud.webContents.send(CHANNELS.onDeactivate);
+  });
+
   if (wake) {
     log.info('wake.enabled', { threshold: wake.threshold });
   } else {
