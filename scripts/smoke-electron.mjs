@@ -1,181 +1,150 @@
 /**
- * Electron 全链路冒烟（Plan 7/8）——用户本机跑。
+ * Electron 全链路冒烟（Plan 9）——用户本机跑。
  *
- * 启动 Electron + 加载 HUD + 模拟用户操作 + 收集日志，验证：
- *   renderer 加载 → capabilities 查询 → coach:run 流水线 → 流式蹦字 → coach:result → 渲染卡片。
+ * 启动 Electron + 注册主进程 IPC + 加载 HUD + 驱动两轮对话 + 收集日志，验证：
+ *   renderer 加载 → capabilities → 两轮 coach 流水线（真 MiMo）→ 流式蹦字 → coach:result
+ *   → 对话流气泡渲染 → 跨轮记忆（第二轮记得第一轮）。
  *
- * 沙箱跑不了（需 Electron GUI + desktopCapturer + AudioContext）。用户本机：
- *   npm run build && electron scripts/smoke-electron.mjs
- *
+ * 沙箱跑不了（需 Electron GUI + AudioContext）。用户本机：
+ *   npm run smoke:electron      （= npm run build && electron scripts/smoke-electron.mjs）
+ * 需 .env 的 LLM key（真调 MiMo，花钱）。默认不截屏（SMOKE_SCREENSHOT=1 开）。
  * 写 logs/smoke/electron-<ts>.json 摘要供 LLM/agent 诊断。
  */
-import { app, BrowserWindow, ipcMain } from 'electron';
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { app, BrowserWindow, session } from 'electron';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
+import { registerCoachIpc } from '../dist/main/ipc.js';
 
 loadDotenv();
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
-const INPUT = process.env.SMOKE_INPUT ?? '帮我怼回去：他说我代码像屎山';
+// 两轮：首轮埋记忆，次轮验证记住了。可用 env 覆盖。
+const TURN1 = process.env.SMOKE_INPUT ?? '记住，我的幸运数字是 7。简短回应一下就行。';
+const TURN2 = process.env.SMOKE_INPUT2 ?? '我的幸运数字是几？只回答数字。';
+const MEMORY_RE = /7|七/;
 const WITH_SCREENSHOT = process.env.SMOKE_SCREENSHOT === '1';
-
-const steps = [];
-const step = (name, fn) => {
-  const t0 = Date.now();
-  return Promise.resolve(fn()).then(
-    (r) => { steps.push({ name, status: 'pass', latencyMs: Date.now() - t0 }); return r; },
-    (e) => { steps.push({ name, status: 'fail', latencyMs: Date.now() - t0, error: e?.message ?? String(e) }); throw e; },
-  );
-};
 
 const events = [];
 const log = (msg, extra) => {
-  const line = JSON.stringify({ ts: new Date().toISOString(), msg, ...extra });
+  const line = JSON.stringify({ ts: new Date().toISOString(), msg, ...(extra || {}) });
   process.stderr.write(line + '\n');
-  events.push({ ts: new Date().toISOString(), msg, ...extra });
+  events.push({ ts: new Date().toISOString(), msg, ...(extra || {}) });
 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitFor(win, exprBool, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await win.webContents.executeJavaScript(exprBool)) return;
+    await sleep(200);
+  }
+  throw new Error('timeout: ' + label);
+}
+
+// 看门狗：无论如何 150s 后退出，避免挂死。
+setTimeout(() => { log('smoke.watchdog'); app.exit(2); }, 150000);
 
 async function main() {
   const startTs = Date.now();
-  log('smoke.electron.start', { input: INPUT, withScreenshot: WITH_SCREENSHOT });
-
+  log('smoke.electron.start', { turn1: TURN1, turn2: TURN2, withScreenshot: WITH_SCREENSHOT });
   await app.whenReady();
+  session.defaultSession.setPermissionRequestHandler((_wc, p, cb) => cb(p === 'media'));
 
-  // 加载 preload + HUD
-  const win = await step('createWindow', async () => {
-    const w = new BrowserWindow({
-      width: 480, height: 720, show: true,
-      webPreferences: {
-        preload: join(ROOT, 'dist', 'main', 'preload.js'),
-        contextIsolation: true, nodeIntegration: false,
-      },
-    });
-    await w.loadFile(join(ROOT, 'src', 'renderer', 'hud.html'));
-    return w;
+  const win = new BrowserWindow({
+    width: 400, height: 880, show: true, backgroundColor: '#0a0410',
+    webPreferences: {
+      preload: join(ROOT, 'dist', 'main', 'preload.js'),
+      contextIsolation: true, nodeIntegration: false, sandbox: false,
+    },
   });
+  // 先注册 IPC（capabilities/coach/voice/...）再加载页面，避免渲染层启动查询时无 handler。
+  // wake=null：冒烟不启动本地声学唤醒（不需要 models，也不抢麦克风）。
+  registerCoachIpc(win, null);
+  await win.loadFile(join(ROOT, 'dist', 'renderer', 'hud.html'));
+  log('window.loaded');
 
-  // 等 renderer ready（capabilities 查询成功 = preload 注入成功 + IPC 通）
-  const caps = await step('queryCapabilities', () =>
-    win.webContents.executeJavaScript(`window.zuiti.capabilities()`),
-  );
+  // 等 preload + IPC 通
+  await waitFor(win, 'typeof window.zuiti === "object" && !!window.zuiti.capabilities', 15000, 'preload');
+  const caps = await win.webContents.executeJavaScript('window.zuiti.capabilities()');
   log('smoke.caps', { asr: caps.asr, tts: caps.tts, wake: !!caps.wake });
 
-  // 监听 coach 事件（通过 executeJavaScript 注入钩子）
-  let chunkCount = 0;
-  let firstChunkAt = 0;
-  let resultAt = 0;
-  let resultDto = null;
-  let errorMsg = null;
+  // 挂结果钩子（累积每轮 result / chunks / error）
+  await win.webContents.executeJavaScript(`
+    window.__smoke = { results: [], chunks: 0, error: null };
+    window.zuiti.onReplyChunk(() => window.__smoke.chunks++);
+    window.zuiti.onResult((dto) => window.__smoke.results.push(dto));
+    window.zuiti.onError((m) => window.__smoke.error = m);
+    true;
+  `);
 
-  await step('installHooks', () =>
-    win.webContents.executeJavaScript(`
-      window.__smoke = { chunks: 0, firstChunkAt: 0, resultAt: 0, result: null, error: null };
-      window.zuiti.onReplyChunk((t) => {
-        window.__smoke.chunks++;
-        if (!window.__smoke.firstChunkAt) window.__smoke.firstChunkAt = Date.now();
-      });
-      window.zuiti.onResult((dto) => {
-        window.__smoke.resultAt = Date.now();
-        window.__smoke.result = dto;
-      });
-      window.zuiti.onError((msg) => {
-        window.__smoke.error = msg;
-      });
-      true;
-    `),
-  );
+  async function runTurn(text, idx) {
+    const t0 = Date.now();
+    // 走 preload runCoach（确定性、可控是否截屏）；主进程用同一个保活会话 → 跨轮记忆。
+    await win.webContents.executeJavaScript(`window.zuiti.runCoach(${JSON.stringify(text)}, ${WITH_SCREENSHOT}); true;`);
+    await waitFor(win, `window.__smoke.results.length >= ${idx} || !!window.__smoke.error`, 60000, 'result ' + idx);
+    const err = await win.webContents.executeJavaScript('window.__smoke.error');
+    if (err) throw new Error('coach error: ' + err);
+    const dto = await win.webContents.executeJavaScript(`window.__smoke.results[${idx - 1}]`);
+    log('smoke.turn', { idx, ms: Date.now() - t0, skillId: dto.skillId, primaryLen: dto.primary?.text?.length ?? 0, items: dto.items?.length ?? 0 });
+    return dto;
+  }
 
-  // 触发 coach:run
-  const triggerTs = Date.now();
-  await step('triggerRun', () => {
-    win.webContents.send('coach:run' in window ? 'noop' : 'noop'); // coach:run 经 runCoach
-    return win.webContents.executeJavaScript(`window.zuiti.runCoach(${JSON.stringify(INPUT)}, ${WITH_SCREENSHOT})`);
-  });
+  const t1 = await runTurn(TURN1, 1);
+  await sleep(600);
+  const t2 = await runTurn(TURN2, 2);
+  const memoryRecalled = MEMORY_RE.test(t2.primary?.text ?? '');
+  await sleep(400);
 
-  // 等结果（轮询 __smoke.result，超时 60s）
-  await step('waitForResult', async () => {
-    const deadline = Date.now() + 60000;
-    while (Date.now() < deadline) {
-      const s = await win.webContents.executeJavaScript('window.__smoke');
-      if (s.error) throw new Error('coach error: ' + s.error);
-      if (s.result) {
-        chunkCount = s.chunks;
-        firstChunkAt = s.firstChunkAt;
-        resultAt = s.resultAt;
-        resultDto = s.result;
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    throw new Error('超时 60s 未收到 coach:result');
-  });
-
-  // 读渲染后的 DOM（验证字段驱动渲染）
-  const domState = await step('readDom', () =>
-    win.webContents.executeJavaScript(`
-      ({
-        titleVisible: !document.getElementById('outTitle').hidden,
-        titleText: document.getElementById('outTitle').textContent,
-        primaryText: document.getElementById('outPrimary').textContent.slice(0, 200),
-        itemsCount: document.getElementById('outItems').children.length,
-        noteVisible: !document.getElementById('outNote').hidden,
-        noteText: document.getElementById('outNote').textContent,
-      })
-    `),
-  );
+  // 读新版对话流 DOM（字段驱动渲染 → 气泡 + 候选卡）
+  const dom = await win.webContents.executeJavaScript(`
+    (() => {
+      const as = [...document.querySelectorAll('.bubble--assistant')];
+      const last = as[as.length - 1];
+      return {
+        assistantBubbles: as.length,
+        lastPrimary: last ? (last.querySelector('.bubble__text')?.textContent || '').slice(0, 120) : '',
+        lastItems: last ? last.querySelectorAll('.reply-item').length : 0,
+        emptyHidden: document.getElementById('transcriptEmpty')?.hidden ?? null,
+      };
+    })()
+  `);
 
   const result = {
     ts: new Date(startTs).toISOString(),
-    input: INPUT,
-    withScreenshot: WITH_SCREENSHOT,
     totalMs: Date.now() - startTs,
-    firstChunkMs: firstChunkAt ? firstChunkAt - triggerTs : null,
-    resultMs: resultAt ? resultAt - triggerTs : null,
-    chunkCount,
-    skillId: resultDto?.skillId ?? 'unknown',
-    primaryLen: resultDto?.primary?.text?.length ?? 0,
-    primaryPreview: resultDto?.primary?.text?.slice(0, 200) ?? '',
-    itemsCount: resultDto?.items?.length ?? 0,
-    dom: domState,
-    steps,
+    caps: { asr: caps.asr, tts: caps.tts, wake: !!caps.wake },
+    turn1: { skillId: t1.skillId, primary: t1.primary?.text?.slice(0, 160), items: t1.items?.length ?? 0 },
+    turn2: { skillId: t2.skillId, primary: t2.primary?.text?.slice(0, 160), items: t2.items?.length ?? 0 },
+    memoryRecalled,
+    dom,
     events,
   };
-
   const outDir = resolve(ROOT, 'logs', 'smoke');
   mkdirSync(outDir, { recursive: true });
   const outFile = resolve(outDir, `electron-${Date.now()}.json`);
   writeFileSync(outFile, JSON.stringify(result, null, 2) + '\n', 'utf8');
 
-  log('smoke.electron.pass', { totalMs: result.totalMs, skillId: result.skillId, outFile });
-  console.log('[smoke-electron] PASS');
-  console.log('  skillId:', result.skillId);
-  console.log('  首字延迟:', result.firstChunkMs + 'ms');
-  console.log('  结果延迟:', result.resultMs + 'ms');
-  console.log('  流式 chunks:', result.chunkCount);
-  console.log('  DOM itemsCount:', result.dom.itemsCount);
-  console.log('  primary:', result.primaryPreview.slice(0, 80) + '...');
-  console.log('  摘要:', outFile);
+  if (!memoryRecalled) throw new Error('多轮记忆未命中：turn2="' + (t2.primary?.text ?? '') + '"（期望含 7/七）');
 
+  log('smoke.electron.pass', { memoryRecalled, outFile });
+  console.log('\n[smoke-electron] PASS ✅');
+  console.log('  turn1:', result.turn1.primary);
+  console.log('  turn2:', result.turn2.primary, '| memoryRecalled:', memoryRecalled);
+  console.log('  assistantBubbles:', dom.assistantBubbles, '| emptyHidden:', dom.emptyHidden);
+  console.log('  摘要:', outFile);
   app.quit();
 }
 
 main().catch((err) => {
   log('smoke.electron.fail', { error: err?.message ?? String(err), stack: err?.stack });
   const outDir = resolve(ROOT, 'logs', 'smoke');
-  mkdirSync(outDir, { recursive: true });
-  const outFile = resolve(outDir, `electron-${Date.now()}-fail.json`);
-  writeFileSync(outFile, JSON.stringify({
-    ts: new Date().toISOString(),
-    input: INPUT,
-    error: err?.message ?? String(err),
-    stack: err?.stack,
-    steps, events,
-  }, null, 2) + '\n', 'utf8');
+  try {
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(resolve(outDir, `electron-${Date.now()}-fail.json`), JSON.stringify({ error: err?.message ?? String(err), stack: err?.stack, events }, null, 2) + '\n', 'utf8');
+  } catch { /* ignore */ }
   console.error('[smoke-electron] FAIL:', err?.message ?? err);
-  console.error('  摘要:', outFile);
   app.exit(1);
 });
