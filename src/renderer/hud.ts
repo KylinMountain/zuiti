@@ -661,17 +661,24 @@ $('obTest')?.addEventListener('click', async () => {
     apiKey: ($('obApiKey') as HTMLInputElement).value.trim() || undefined,
     baseURL: ($('obBaseUrl') as HTMLInputElement).value.trim() || undefined,
   }});
-  const el = $('obResult')!; el.textContent = '测试中…';
-  const [r] = await api.testConnection('llm');
-  el.textContent = r.ok ? '✅ 连接正常' : '❌ ' + r.message;
-  ($('obDone') as HTMLButtonElement).disabled = !r.ok;
-  updateConnDot(r.ok, [r]);
+  const el = $('obResult')!;
+  el.textContent = '测试中…';
+  try {
+    const results = await api.testConnection('llm');
+    const r = results[0];
+    if (!r) { el.textContent = '❌ 无响应'; return; }
+    el.textContent = r.ok ? '✅ 连接正常' : '❌ ' + r.message;
+    ($('obDone') as HTMLButtonElement).disabled = !r.ok;
+    updateConnDot(r.ok, [r]);
+  } catch {
+    el.textContent = '❌ 请求失败';
+  }
 });
 
 $('obDone')?.addEventListener('click', hideOnboarding);
 $('obSkip')?.addEventListener('click', hideOnboarding);
 
-api.onConnectionStatus((health) => updateConnDot(health.every((h) => h.ok), health));
+api.onConnectionStatus((health) => updateConnDot(health.length > 0 && health.every((h) => h.ok), health));
 
 const $settingsBtn = $('settingsBtn') as HTMLButtonElement;
 const $settingsPanel = $('settingsPanel') as HTMLElement;
