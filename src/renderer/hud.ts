@@ -585,7 +585,7 @@ api.onDeactivate(() => {
 
 // ============ 启动：查能力 + 初始化本地 openWakeWord ============
 void api.capabilities().then(async (caps) => {
-  rlog('info', 'caps', { asr: caps.asr, tts: caps.tts, wake: !!caps.wake });
+  rlog('info', 'caps', { asr: caps.asr, tts: caps.tts, wake: !!caps.wake, configured: caps.configured });
   caps_wake = caps.wake;
   if (caps.wake) {
     void ensureWakeWord();
@@ -595,6 +595,8 @@ void api.capabilities().then(async (caps) => {
   } else {
     rlog('warn', 'wakeword.disabled', { reason: 'no wake runtime' });
   }
+  updateConnDot(caps.configured, caps.health);
+  if (!caps.configured) showOnboarding();
 });
 
 // ============ 工具函数 ============
@@ -624,9 +626,58 @@ $text.focus();
 
 // ============ 设置面板 ============
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
+
+// ============ 连接状态点 ============
+function updateConnDot(configured: boolean | undefined, health?: HealthResultDTO[]): void {
+  const dot = $('connDot')!;
+  if (!dot) return;
+  const llm = health?.find((h) => h.service === 'llm');
+  let state: 'ok' | 'warn' | 'unset' = configured ? 'ok' : 'unset';
+  if (llm && !llm.ok) state = llm.kind === 'authInvalid' ? 'unset' : 'warn';
+  dot.className = 'status-dot status-dot--' + state;
+  dot.title = state === 'ok' ? '连接正常' : (llm?.message ?? '未配置');
+}
+
+// ============ 首次向导 ============
+const $onboarding = $('onboarding')!;
+
+function showOnboarding(): void {
+  $onboarding.removeAttribute('hidden');
+  void prefillOnboarding();
+}
+
+function hideOnboarding(): void {
+  $onboarding.setAttribute('hidden', '');
+}
+
+async function prefillOnboarding(): Promise<void> {
+  const c = await api.getConfig();
+  ($('obApiKey') as HTMLInputElement).value = c.credential.apiKey ?? '';
+  ($('obBaseUrl') as HTMLInputElement).value = c.credential.baseURL ?? 'https://token-plan-cn.xiaomimimo.com/v1';
+}
+
+$('obTest')?.addEventListener('click', async () => {
+  await api.setConfig({ credential: {
+    apiKey: ($('obApiKey') as HTMLInputElement).value.trim() || undefined,
+    baseURL: ($('obBaseUrl') as HTMLInputElement).value.trim() || undefined,
+  }});
+  const el = $('obResult')!; el.textContent = '测试中…';
+  const [r] = await api.testConnection('llm');
+  el.textContent = r.ok ? '✅ 连接正常' : '❌ ' + r.message;
+  ($('obDone') as HTMLButtonElement).disabled = !r.ok;
+  updateConnDot(r.ok, [r]);
+});
+
+$('obDone')?.addEventListener('click', hideOnboarding);
+$('obSkip')?.addEventListener('click', hideOnboarding);
+
+api.onConnectionStatus((health) => updateConnDot(health.every((h) => h.ok), health));
+
 const $settingsBtn = $('settingsBtn') as HTMLButtonElement;
 const $settingsPanel = $('settingsPanel') as HTMLElement;
 const $settingsClose = $('settingsClose') as HTMLButtonElement;
+
+$('connDot')?.addEventListener('click', () => { $settingsPanel.hidden = false; void loadSettingsUI(); });
 const $settingDefaultStyle = $('settingDefaultStyle') as HTMLSelectElement;
 const $settingTts = $('settingTts') as HTMLInputElement;
 const $settingWakeThreshold = $('settingWakeThreshold') as HTMLInputElement;
