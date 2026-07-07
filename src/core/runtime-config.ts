@@ -47,13 +47,13 @@ export function getTts(): { model: string; voice: string } {
 }
 export function getAdvanced(): { wakeThreshold: number } {
   ensure();
-  return { wakeThreshold: file.advanced.wakeThreshold ?? DEFAULTS.wakeThreshold };
+  return { wakeThreshold: file.advanced.wakeThreshold !== undefined ? file.advanced.wakeThreshold : DEFAULTS.wakeThreshold };
 }
 export function getUi(): { defaultStyle: string; ttsEnabled: boolean } {
   ensure();
   return {
     defaultStyle: file.ui.defaultStyle ?? DEFAULTS.defaultStyle,
-    ttsEnabled: file.ui.ttsEnabled ?? DEFAULTS.ttsEnabled,
+    ttsEnabled: file.ui.ttsEnabled !== undefined ? file.ui.ttsEnabled : DEFAULTS.ttsEnabled,
   };
 }
 export function getEffectiveConfig(): ZuitiConfig {

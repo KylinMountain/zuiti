@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { initRuntimeConfig, getCredential, getLlmModel, getAsr, getTts, getAdvanced } from '../core/runtime-config.js';
+import { initRuntimeConfig, getCredential, getLlmModel, getAsr, getTts, getAdvanced, getUi } from '../core/runtime-config.js';
 import { EMPTY_CONFIG } from '../core/config-store.js';
 
 test('默认值（无 file 无 env）', () => {
@@ -22,4 +22,14 @@ test('userData 覆盖 env', () => {
   assert.deepEqual(getCredential(), { apiKey: 'tp-file', baseURL: 'https://file/v1' });
   assert.equal(getLlmModel(), 'm-file');
   assert.equal(getTts().voice, '小美');
+});
+
+test('存储的 ttsEnabled=false 不被默认值覆盖', () => {
+  initRuntimeConfig({ ...EMPTY_CONFIG, ui: { ttsEnabled: false } }, {});
+  assert.equal(getUi().ttsEnabled, false);
+});
+
+test('存储的 wakeThreshold=0 不被默认值覆盖', () => {
+  initRuntimeConfig({ ...EMPTY_CONFIG, advanced: { wakeThreshold: 0 } }, {});
+  assert.equal(getAdvanced().wakeThreshold, 0);
 });
