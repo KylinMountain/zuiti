@@ -67,14 +67,6 @@ export const CHANNELS = {
   historyList: 'history:list',
   /** 渲染 → 主：清除所有历史记录。 */
   historyClear: 'history:clear',
-  /** 渲染 → 主：读取设置（key 或全部）。
-   * @deprecated Use configGet instead. Will be removed in Task 8.
-   */
-  settingsGet: 'settings:get',
-  /** 渲染 → 主：写入设置。
-   * @deprecated Use configSet instead. Will be removed in Task 8.
-   */
-  settingsSet: 'settings:set',
   /** 渲染 → 主：读取完整配置（key 脱敏由主进程决定）。 */
   configGet: 'config:get',
   /** 渲染 → 主：部分更新配置（写 userData + 重载 runtime-config）。 */
@@ -94,16 +86,6 @@ export interface WakeRuntime {
   melModel: string;
   embModel: string;
   wakeModel: string;
-}
-
-/** 用户可配置的设置项。 */
-export interface ZuitiSettings {
-  /** 默认风格 */
-  defaultStyle?: string;
-  /** TTS 是否开启 */
-  ttsEnabled?: boolean;
-  /** 唤醒词阈值 0.0-1.0 */
-  wakeThreshold?: number;
 }
 
 /** 用户可选的风格（影响 LLM 输出语气）。 */

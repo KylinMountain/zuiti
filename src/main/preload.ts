@@ -85,20 +85,6 @@ const api = {
   clearHistory: (): Promise<void> => {
     return ipcRenderer.invoke(CHANNELS.historyClear);
   },
-  /**
-   * 读取设置。key 不传返回全部设置。
-   * @deprecated Use getConfig() instead. Will be removed in Task 9.
-   */
-  getSettings: (key?: string): Promise<Record<string, unknown>> => {
-    return ipcRenderer.invoke(CHANNELS.settingsGet, key);
-  },
-  /**
-   * 写入设置（部分更新）。
-   * @deprecated Use setConfig() instead. Will be removed in Task 9.
-   */
-  saveSettings: (settings: Record<string, unknown>): Promise<void> => {
-    return ipcRenderer.invoke(CHANNELS.settingsSet, settings);
-  },
   /** 读取完整配置（key 脱敏由主进程决定）。 */
   getConfig: (): Promise<ZuitiConfigDTO> => ipcRenderer.invoke(CHANNELS.configGet),
   /** 部分更新配置（写 userData + 重载 runtime-config）。 */

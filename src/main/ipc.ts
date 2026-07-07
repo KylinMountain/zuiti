@@ -20,17 +20,31 @@ import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import { MiraConversation } from '../modules/mira/conversation.js';
 import { join } from 'node:path';
 import { CHANNELS, type Capabilities, type WakeRuntime, type ReplyStyle } from '../shared/ipc.js';
+import { loadConfig, saveConfig } from '../core/config-store.js';
+import { initRuntimeConfig, getEffectiveConfig } from '../core/runtime-config.js';
+import { checkAll, checkLlm, checkAsr, checkTts, type HealthResult } from '../core/service-health.js';
+import { classifyError, isClassifiedError } from '../core/errors.js';
 
 /**
  * 注册 coach + voice + capabilities IPC handlers。主进程启动时调用一次。
  * @param wake 唤醒词运行时（null 时功能关闭，渲染层不启动 openWakeWord）。
  */
 export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): { endConversation: () => void } {
+  const userDataDir = app.getPath('userData');
+  let lastHealth: HealthResult[] = [];
+  function isConfigured(): boolean {
+    const c = getEffectiveConfig().credential;
+    const llmOk = lastHealth.find((h) => h.service === 'llm')?.ok;
+    return !!c.apiKey && !!c.baseURL && llmOk === true;
+  }
+
   /** 渲染层启动时查询能力：asr/tts 是否可用 + wake 运行时（含模型 base64）。 */
   ipcMain.handle(CHANNELS.capabilities, async (): Promise<Capabilities> => ({
     asr: true,
     tts: true,
     wake,
+    configured: isConfigured(),
+    health: lastHealth,
   }));
 
   /** 渲染层日志转发：写入同一个日志文件，agent 可统一分析。 */
@@ -102,6 +116,16 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         onTtsStart: (firstSentence) => startTtsStream(firstSentence, mainWindow),
         style,
       });
+      // 空轮兜底：sendTurn 未抛但 primary 空且没 skill → 检查 LLM 健康
+      if (!output.primary.text.trim() && !output.skillId) {
+        const h = await checkLlm();
+        lastHealth = [...lastHealth.filter((x) => x.service !== 'llm'), h];
+        mainWindow.webContents.send(CHANNELS.configStatus, lastHealth);
+        if (!h.ok) {
+          mainWindow.webContents.send(CHANNELS.coachError, classifyError({ httpStatus: h.httpStatus, cause: h.message }));
+          return;
+        }
+      }
       mainWindow.webContents.send(CHANNELS.coachResult, output);
       // 等本轮所有 TTS 合成（首句 + 剩余）排队完，再统一发一次 ttsDone：一轮只发一次，
       // 避免中途 ttsDone 提前重开麦 + 播放时序错乱（几段一起读）。无 TTS（纯候选/空 primary）
@@ -128,10 +152,14 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         outputShape: summary.outputShape,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const stack = err instanceof Error ? err.stack : undefined;
-      mainWindow.webContents.send(CHANNELS.coachError, msg);
-      log.error('coach.run.error', { msg, stack, tookMs: Date.now() - t0 });
+      const classified = isClassifiedError(err) ? err : classifyError({ cause: err });
+      mainWindow.webContents.send(CHANNELS.coachError, classified);
+      // 若是凭证问题，刷新健康态 + 推送状态点
+      if (classified.kind === 'authInvalid') {
+        lastHealth = [...lastHealth.filter((h) => h.service !== 'llm'), await checkLlm()];
+        mainWindow.webContents.send(CHANNELS.configStatus, lastHealth);
+      }
+      log.error('coach.run.error', { kind: classified.kind, msg: classified.userMessage, tookMs: Date.now() - t0 });
     }
   }
 
@@ -176,7 +204,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         log.info('voice.transcript', { textLen: text.length });
 
         if (!text) {
-          mainWindow.webContents.send(CHANNELS.voiceError, '没听清，再说一次？');
+          mainWindow.webContents.send(CHANNELS.coachError, classifyError({ code: 'asrEmpty' }));
           return;
         }
         mainWindow.webContents.send(CHANNELS.voiceTranscript, text);
@@ -206,29 +234,22 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     } catch { /* file may not exist */ }
   });
 
-  // ---- Settings IPC ----
-  const settingsPath = join(app.getPath('userData'), 'zuiti-settings.json');
+  // ---- Config IPC ----
+  ipcMain.handle(CHANNELS.configGet, () => getEffectiveConfig());
 
-  function readSettingsFile(): Record<string, unknown> {
-    try { return JSON.parse(readFileSync(settingsPath, 'utf8')); }
-    catch { return {}; }
-  }
-
-  ipcMain.handle(CHANNELS.settingsGet, (_e, key?: string): Record<string, unknown> => {
-    const all = readSettingsFile();
-    if (key) return { [key]: all[key] };
-    return all;
+  ipcMain.handle(CHANNELS.configSet, (_e, patch: Parameters<typeof saveConfig>[1]) => {
+    const merged = saveConfig(userDataDir, patch);
+    initRuntimeConfig(merged, process.env);
+    log.info('config.saved', { sections: Object.keys(patch) });
+    return getEffectiveConfig();
   });
 
-  ipcMain.handle(CHANNELS.settingsSet, (_e, patch: Record<string, unknown>): void => {
-    const all = readSettingsFile();
-    Object.assign(all, patch);
-    try {
-      writeFileSync(settingsPath, JSON.stringify(all, null, 2), 'utf8');
-      log.info('settings.saved', { keys: Object.keys(patch) });
-    } catch (err) {
-      log.error('settings.save.failed', { msg: err instanceof Error ? err.message : String(err) });
-    }
+  ipcMain.handle(CHANNELS.configTest, async (_e, service: 'llm' | 'asr' | 'tts' | 'all'): Promise<HealthResult[]> => {
+    const fns = { llm: checkLlm, asr: checkAsr, tts: checkTts };
+    const results = service === 'all' ? await checkAll() : [await fns[service]()];
+    for (const r of results) lastHealth = [...lastHealth.filter((h) => h.service !== r.service), r];
+    mainWindow.webContents.send(CHANNELS.configStatus, lastHealth);
+    return results;
   });
 
   return { endConversation };

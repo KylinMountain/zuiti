@@ -5,7 +5,7 @@
  * 唤醒后：截屏看屏 → 唤起 HUD → 聚焦输入（语音/文字均可）。
  */
 import { app, session, ipcMain, type BrowserWindow } from 'electron';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHudWindow, showHud, toggleHud } from './window.js';
@@ -13,8 +13,27 @@ import { createTray, destroyTray } from './tray.js';
 import { registerCoachIpc } from './ipc.js';
 import { CHANNELS, type WakeRuntime } from '../shared/ipc.js';
 import { log } from '../core/log.js';
+import { loadConfig, saveConfig } from '../core/config-store.js';
+import { initRuntimeConfig } from '../core/runtime-config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** 一次性把旧 zuiti-settings.json 的字段迁入新 zuiti-config.json 结构。 */
+function migrateLegacySettings(dir: string): void {
+  const legacy = join(dir, 'zuiti-settings.json');
+  const next = join(dir, 'zuiti-config.json');
+  if (!existsSync(legacy) || existsSync(next)) return;
+  try {
+    const s = JSON.parse(readFileSync(legacy, 'utf8')) as { defaultStyle?: string; ttsEnabled?: boolean; wakeThreshold?: number };
+    saveConfig(dir, {
+      ui: { defaultStyle: s.defaultStyle, ttsEnabled: s.ttsEnabled },
+      advanced: { wakeThreshold: s.wakeThreshold },
+    });
+    log.info('settings.migrated');
+  } catch (err) {
+    log.warn('settings.migrate.failed', { msg: err instanceof Error ? err.message : String(err) });
+  }
+}
 
 let hud: BrowserWindow | null = null;
 let endConversation: () => void = () => {};
@@ -77,6 +96,11 @@ app.whenReady().then(() => {
 
   hud = createHudWindow();
   log.info('window.created');
+
+  // 载入 userData 配置并初始化 runtime-config（userData > env > 默认）。
+  const userDataDir = app.getPath('userData');
+  migrateLegacySettings(userDataDir);
+  initRuntimeConfig(loadConfig(userDataDir), process.env);
 
   const wake = buildWakeRuntime();
   const coachIpc = registerCoachIpc(hud, wake);
