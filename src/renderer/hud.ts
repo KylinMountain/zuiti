@@ -514,6 +514,11 @@ api.onResult((dto) => {
 });
 
 api.onError((err) => {
+  // 清理 onLoading 建的空 assistant 占位气泡（否则每次报错/每次自动重试都会留一个空气泡）
+  if ($curAssistantText && !$curAssistantText.textContent?.trim()) {
+    $curAssistantText.closest('.bubble--assistant')?.remove();
+    $curAssistantText = null;
+  }
   // 瞬时错（network/server）自动重试一次
   if (err.retryable && lastTurn && autoRetriedFor !== err.userMessage) {
     autoRetriedFor = err.userMessage;

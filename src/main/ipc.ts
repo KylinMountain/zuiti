@@ -39,13 +39,13 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
   }
 
   /** 渲染层启动时查询能力：asr/tts 是否可用 + wake 运行时（含模型 base64）。 */
-  ipcMain.handle(CHANNELS.capabilities, async (): Promise<Capabilities> => ({
-    asr: true,
-    tts: true,
-    wake,
-    configured: isConfigured(),
-    health: lastHealth,
-  }));
+  ipcMain.handle(CHANNELS.capabilities, async (): Promise<Capabilities> => {
+    const cred = getEffectiveConfig().credential;
+    if (cred.apiKey && cred.baseURL && !lastHealth.some((h) => h.service === 'llm')) {
+      lastHealth = [...lastHealth.filter((h) => h.service !== 'llm'), await checkLlm()];
+    }
+    return { asr: true, tts: true, wake, configured: isConfigured(), health: lastHealth };
+  });
 
   /** 渲染层日志转发：写入同一个日志文件，agent 可统一分析。 */
   ipcMain.on(CHANNELS.rendererLog, (_e, level: string, msg: string, extra?: Record<string, unknown>) => {
@@ -215,9 +215,15 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         mainWindow.webContents.send(CHANNELS.voiceTranscript, text);
         await runSkillPipeline(text, withScreenshot, style);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        mainWindow.webContents.send(CHANNELS.voiceError, msg);
-        log.error('voice.recorded.error', { msg });
+        const m = String(err instanceof Error ? err.message : err).match(/\b(4\d\d|5\d\d)\b/);
+        const httpStatus = m ? Number(m[1]) : undefined;
+        const classified = isClassifiedError(err) ? err : classifyError({ httpStatus, cause: err });
+        mainWindow.webContents.send(CHANNELS.coachError, classified);
+        if (classified.kind === 'authInvalid') {
+          lastHealth = [...lastHealth.filter((h) => h.service !== 'llm'), await checkLlm()];
+          mainWindow.webContents.send(CHANNELS.configStatus, lastHealth);
+        }
+        log.error('voice.recorded.error', { kind: classified.kind });
       }
     })();
   });

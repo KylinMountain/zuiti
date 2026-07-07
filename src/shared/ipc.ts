@@ -47,8 +47,6 @@ export const CHANNELS = {
   voiceTtsChunk: 'voice:ttsChunk',
   /** 主 → 渲染：TTS 完成。 */
   voiceTtsDone: 'voice:ttsDone',
-  /** 主 → 渲染：语音出错。 */
-  voiceError: 'voice:error',
   /** 渲染 → 主：本地唤醒词命中，请求唤起面板。 */
   wake: 'wake:trigger',
   /** 主 → 渲染：被热键/托盘/唤醒词唤起，聚焦输入框。 */
@@ -67,7 +65,7 @@ export const CHANNELS = {
   historyList: 'history:list',
   /** 渲染 → 主：清除所有历史记录。 */
   historyClear: 'history:clear',
-  /** 渲染 → 主：读取完整配置（key 脱敏由主进程决定）。 */
+  /** 渲染 → 主：读取完整配置（明文；UI 用密码框遮蔽显示）。 */
   configGet: 'config:get',
   /** 渲染 → 主：部分更新配置（写 userData + 重载 runtime-config）。 */
   configSet: 'config:set',

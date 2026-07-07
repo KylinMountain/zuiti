@@ -53,10 +53,6 @@ const api = {
   onTranscript: (cb: (text: string) => void): void => {
     ipcRenderer.on(CHANNELS.voiceTranscript, (_e, text: string) => cb(text));
   },
-  /** 监听 ASR 错误。 */
-  onVoiceError: (cb: (msg: string) => void): void => {
-    ipcRenderer.on(CHANNELS.voiceError, (_e, msg: string) => cb(msg));
-  },
   /** 收起面板（隐藏窗口 + 结束本次对话）。 */
   hidePanel: (): void => {
     ipcRenderer.send(CHANNELS.panelHide);
@@ -85,7 +81,7 @@ const api = {
   clearHistory: (): Promise<void> => {
     return ipcRenderer.invoke(CHANNELS.historyClear);
   },
-  /** 读取完整配置（key 脱敏由主进程决定）。 */
+  /** 读取完整配置（明文；UI 用密码框遮蔽显示）。 */
   getConfig: (): Promise<ZuitiConfigDTO> => ipcRenderer.invoke(CHANNELS.configGet),
   /** 部分更新配置（写 userData + 重载 runtime-config）。 */
   setConfig: (patch: Partial<ZuitiConfigDTO>): Promise<ZuitiConfigDTO> => ipcRenderer.invoke(CHANNELS.configSet, patch),
