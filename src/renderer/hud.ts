@@ -31,7 +31,6 @@ declare global {
       onReplyChunk(cb: (replySoFar: string) => void): void;
       onError(cb: (err: ClassifiedErrorDTO) => void): void;
       onTranscript(cb: (text: string) => void): void;
-      onVoiceError(cb: (msg: string) => void): void;
       onTtsChunk(cb: (base64: string) => void): void;
       onTtsDone(cb: () => void): void;
       getConfig(): Promise<ZuitiConfigDTO>;
@@ -212,6 +211,9 @@ let noSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 const NO_SPEECH_MS = 10_000;
 let firstTurnPending = true; // 本次对话首轮带截图
 
+// ============ 上一轮输入缓存（供重试用） ============
+let lastTurn: { text: string; withScreenshot: boolean } | null = null;
+
 function clearNoSpeechTimer(): void {
   if (noSpeechTimer) { clearTimeout(noSpeechTimer); noSpeechTimer = null; }
 }
@@ -291,6 +293,7 @@ function runCoach(): void {
   $text.value = '';
   const withScreenshot = ($screenshot && $screenshot.checked) || firstTurnPending;
   if (withScreenshot) firstTurnPending = false;
+  lastTurn = { text, withScreenshot };
   api.runCoach(text, withScreenshot, currentStyle);
 }
 
@@ -423,6 +426,7 @@ async function handleRecordingStop(): Promise<void> {
     rlog('info', 'mic.sendAsr', { wavBytes: wavBuf.byteLength, sampleRate: audioBuf.sampleRate });
     const withScreenshot = firstTurnPending;
     firstTurnPending = false;
+    lastTurn = { text: '', withScreenshot }; // text will be filled by onTranscript
     api.sendRecordedAudio('data:audio/wav;base64,' + base64, withScreenshot, currentStyle);
   } catch (err) {
     rlog('error', 'mic.decode.failed', { msg: err instanceof Error ? err.message : String(err) });
@@ -469,6 +473,7 @@ $relookBtn?.addEventListener('click', () => {
     const t = $text.value.trim();
     appendUserTurn(t);
     $go.disabled = true;
+    lastTurn = { text: t, withScreenshot: true };
     api.runCoach(t, true, currentStyle);
     $text.value = '';
   } else {
@@ -480,7 +485,11 @@ $relookBtn?.addEventListener('click', () => {
 
 // ============ IPC 监听 ============
 
-api.onTranscript((text) => { appendUserTurn(text); });
+api.onTranscript((text) => {
+  appendUserTurn(text);
+  // Update lastTurn text for voice turns (withScreenshot was set at sendRecordedAudio time)
+  if (lastTurn && lastTurn.text === '') lastTurn = { text, withScreenshot: lastTurn.withScreenshot };
+});
 
 api.onScreenshot((dataUrl) => { appendScreenshotThumb(dataUrl); });
 
@@ -495,26 +504,50 @@ api.onLoading(() => {
 
 api.onReplyChunk((primarySoFar) => { updateAssistantStream(primarySoFar); });
 
+let autoRetriedFor: string | null = null; // 防止无限自动重试（按 userMessage 去重）
+
 api.onResult((dto) => {
   finishAssistantTurn(dto);
   $go.disabled = false;
   $voiceState.hidden = true;
+  autoRetriedFor = null; // 成功一轮，重置自动重试去重
 });
 
 api.onError((err) => {
-  updateAssistantStream('出错了：' + err.userMessage);
-  finishAssistantTurn({ primary: { text: '出错了：' + err.userMessage }, items: [] });
+  // 瞬时错（network/server）自动重试一次
+  if (err.retryable && lastTurn && autoRetriedFor !== err.userMessage) {
+    autoRetriedFor = err.userMessage;
+    rlog('info', 'coach.autoRetry', { kind: err.kind });
+    setTimeout(() => { if (lastTurn) api.runCoach(lastTurn.text, lastTurn.withScreenshot, currentStyle); }, 800);
+    return;
+  }
+  autoRetriedFor = null;
   $go.disabled = false;
   $voiceState.hidden = true;
+  renderErrorBubble(err);
   applyEvent('turnError');
 });
 
-api.onVoiceError((msg) => {
-  $voiceState.hidden = false;
-  $voiceState.textContent = '语音出错：' + msg;
-  setAvatarState('idle');
-  applyEvent('turnError');
-});
+function renderErrorBubble(err: ClassifiedErrorDTO): void {
+  hideEmptyState();
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble bubble--error';
+  const p = document.createElement('p'); p.className = 'bubble__text'; p.textContent = err.userMessage; wrap.appendChild(p);
+  const actions = document.createElement('div'); actions.className = 'bubble__actions';
+  if (err.fixAction === 'openSettings') {
+    const b = document.createElement('button'); b.className = 'bubble__fix'; b.textContent = '去设置';
+    b.addEventListener('click', () => { $settingsPanel.hidden = false; void loadSettingsUI(); });
+    actions.appendChild(b);
+  }
+  if (lastTurn) {
+    const r = document.createElement('button'); r.className = 'bubble__retry'; r.textContent = '重试';
+    r.addEventListener('click', () => { autoRetriedFor = null; api.runCoach(lastTurn!.text, lastTurn!.withScreenshot, currentStyle); });
+    actions.appendChild(r);
+  }
+  wrap.appendChild(actions);
+  $transcript.appendChild(wrap);
+  scrollToBottom();
+}
 
 // TTS 流式播放
 api.onTtsChunk((base64) => {
