@@ -19,13 +19,13 @@ Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
 
 - **Types**：跨进程类型在 `src/shared/ipc.ts`——`CHANNELS` + `UniversalOutput` + `UniversalItem` + `WakeRuntime` + `Capabilities`。零运行时依赖（渲染层 DOM lib 与主进程都编译它）。
 - **Config / Providers**：`src/core/provider.ts`——读 `.env`（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`），用 pi 的 `ModelRegistry.inMemory(authStorage).registerProvider('mimo', …)` 注册 MiMo（OpenAI 兼容端点）。`src/core/mira-model.ts`——MiMo model 元数据（**关 thinking**）。
-- **Core**：`src/core/`——harness 底座：`provider.ts`（接 MiMo）、`mira-model.ts`（关 thinking）、`emit-tool.ts`（`emit_result` 工具工厂）、`log.ts`（结构化日志 + `RunSummary`）、`voice.ts`（ASR/TTS）、`screenshot.ts`、`errors.ts`（`classifyError` → `ErrorKind`：`authInvalid`/`networkError`/`serverError`/`unknown`）、`config-store.ts`（读写 `<userData>/zuiti-config.json`）、`runtime-config.ts`（合并生效配置，单一来源：userData > env > 默认）、`service-health.ts`（`checkLlm`/`checkAsr`/`checkTts`/`checkAll` 服务自检）。
+- **Core**：`src/core/`——harness 底座：`provider.ts`（接 MiMo）、`mira-model.ts`（关 thinking）、`emit-tool.ts`（`emit_result` 工具工厂）、`log.ts`（结构化日志 + `RunSummary`）、`voice.ts`（ASR/TTS）、`screenshot.ts`、`errors.ts`（`classifyError` → `ErrorKind`：`authInvalid`/`networkError`/`serverError`/`unknown`）、`config-store.ts`（读写 `<userData>/zuiti-config.json`）、`runtime-config.ts`（合并生效配置，单一来源：userData > env > 默认）、`service-health.ts`（`checkLlm`/`checkAsr`/`checkTts`/`checkAll` 服务自检）、`crash.ts`（崩溃报告写入：`writeCrashReport` 把 `CrashContext` 序列化到 `<logs>/crash-<ts>.json`，全本地）、`diagnostics.ts`（本地诊断聚合：`aggregateRuns` 读最近 `RunSummary` + `redactConfig` 脱敏 apiKey → `***` + `buildDiagnostics` 输出 `DiagnosticsBundle`，不上云）。
 - **Modules**：`src/modules/`——嘴替 session + skill 流水线：
   - `mira/prompt.ts`——`MIRA_SYSTEM_PROMPT`（嘴替人格，替换 pi 默认 coding prompt）+ `skillsDir()`。
   - `mira/session.ts`——`createMiraSession`：组装单个 pi session（关 thinking MiMo + system prompt + skills 披露 + `tools:['read','emit_result']`）。
   - `mira/conversation.ts`——`MiraConversation`：多轮记忆容器，持久化 pi session 跨轮复用，`sendTurn()` 追加上下文，`reset()` 开新对话。
   - `skill-runner.ts`——`runSkill`：跑 session、订阅文本流式蹦字 + 首句 TTS、收 `emit_result`、组装 `UniversalOutput`、写 `RunSummary`；同时导出 `RunSkillCallbacks`/`RunSkillResult` 供 `MiraConversation` 复用。
-- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期 + 唤醒词模型下发 + 麦克风权限）、`window.ts`（HUD 满高右侧常驻浮窗，置顶，toggle 收起）、`tray.ts`（托盘 + 快捷键）、`ipc.ts`（`runSkillPipeline`：截屏 → `MiraConversation.sendTurn()` → `coach:result` 发 `UniversalOutput`；`conversationReset`/`panelHide`/`onDeactivate` IPC 通道）、`preload.ts`（contextBridge）。
+- **Main (Runtime)**：`src/main/`——Electron 主进程：`index.ts`（生命周期 + 唤醒词模型下发 + 麦克风权限 + `uncaughtException`/`unhandledRejection` 崩溃处理器：调 `writeCrashReport` 写盘后推 `crash:notice` 通知渲染层）、`window.ts`（HUD 满高右侧常驻浮窗，置顶，toggle 收起；注册 `render-process-gone` 事件在渲染进程意外退出时自动 reload）、`tray.ts`（托盘 + 快捷键）、`ipc.ts`（`runSkillPipeline`：截屏 → `MiraConversation.sendTurn()` → `coach:result` 发 `UniversalOutput`；`conversationReset`/`panelHide`/`onDeactivate` IPC 通道；`diag:get`（返回 `DiagStatsDTO`）/`diag:openLogs`（`shell.openPath` 打开日志目录）/`diag:export`（写 `diagnostics-<ts>.json` 并 `shell.showItemInFolder`）诊断 IPC 通道）、`preload.ts`（contextBridge）。
 - **Shared**：`src/shared/`——跨进程类型：
   - `ipc.ts`——`CHANNELS` + `UniversalOutput` + `UniversalItem` + `WakeRuntime` + `Capabilities`。
   - `conv-state.ts`——连续对话状态机：`ConvState`（idle / listening / thinking / speaking）+ `ConvEvent` + `nextConvState()` 纯函数。
@@ -146,7 +146,9 @@ src/
 │   ├── errors.ts          # classifyError → ErrorKind（authInvalid/networkError/serverError/unknown）
 │   ├── config-store.ts    # 读写 <userData>/zuiti-config.json（ZuitiConfig，section 合并，无 Electron 依赖）
 │   ├── runtime-config.ts  # initRuntimeConfig + getCredential/getLlmModel/getAsr/getTts/getUi/getAdvanced
-│   └── service-health.ts  # checkLlm/checkAsr/checkTts/checkAll（最小请求自检 → HealthResult）
+│   ├── service-health.ts  # checkLlm/checkAsr/checkTts/checkAll（最小请求自检 → HealthResult）
+│   ├── crash.ts           # writeCrashReport —— 崩溃上下文序列化到 logs/crash-<ts>.json（全本地）
+│   └── diagnostics.ts     # aggregateRuns + redactConfig（apiKey → "***"）+ buildDiagnostics —— 本地诊断包，不上云
 ├── modules/               # 嘴替 session + skill 流水线
 │   ├── mira/
 │   │   ├── prompt.ts      # MIRA_SYSTEM_PROMPT（嘴替人格）+ skillsDir()

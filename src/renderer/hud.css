@@ -1519,6 +1519,108 @@ html, body {
 .bubble__fix:active,
 .bubble__retry:active { transform: scale(0.95); }
 
+/* ============ Diagnostics stats block ============ */
+/*
+ * .diag-stats lives inside the 「诊断」settings-group, above the actions row.
+ * Small mono text, secondary color, wraps on narrow panels — no horizontal
+ * overflow. Matches the muted info density used in .history-item and
+ * .settings-item__value elsewhere in this file.
+ */
+.diag-stats {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  line-height: 1.6;
+  padding: 8px 12px 6px;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  border-bottom: 1px solid var(--border-subtle);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ============ Crash-notice bar ============ */
+/*
+ * .notice--crash is a flex:0 0 auto row that sits between .topbar and
+ * .transcript in the .app--sidepanel flex column. It does NOT participate
+ * in the transcript scroll; it squeezes the transcript vertically when
+ * visible. Uses amber/rose warning palette (consistent with .bubble--error
+ * and .status-dot--warn already in this file).
+ *
+ * Structure:
+ *   <div class="notice notice--crash" [hidden]>
+ *     <span class="notice__text">…</span>
+ *     <button class="notice__close">×</button>
+ *   </div>
+ */
+.notice {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.notice[hidden] { display: none; }
+
+.notice--crash {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 184, 77, 0.10) 0%,
+    rgba(255, 45, 107, 0.08) 100%
+  );
+  border-bottom: 1px solid rgba(255, 184, 77, 0.28);
+  box-shadow: 0 1px 0 rgba(255, 45, 107, 0.10);
+  animation: noticeSlideDown var(--t-normal) var(--ease-out) both;
+}
+@keyframes noticeSlideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.notice__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-amber);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notice__text::before {
+  content: '⚠ ';
+  color: var(--accent-amber);
+  opacity: 0.85;
+}
+
+.notice__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+  -webkit-app-region: no-drag;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.notice__close:hover {
+  color: var(--accent-amber);
+  background: rgba(255, 184, 77, 0.12);
+}
+.notice__close:active { transform: scale(0.90); }
+
 /* ============ Reduced Motion ============ */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
