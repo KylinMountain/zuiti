@@ -10,7 +10,7 @@ import { initWakeWord } from './wakeword.js';
 import { encodeWav } from './wav.js';
 import { buildRenderPlan } from '../shared/render-plan.js';
 import { REPLY_STYLES, DEFAULT_STYLE, type ReplyStyle } from '../shared/ipc.js';
-import type { Capabilities, UniversalOutput, WakeRuntime } from '../shared/ipc.js';
+import type { Capabilities, UniversalOutput, WakeRuntime, ClassifiedErrorDTO, HealthResultDTO, ZuitiConfigDTO } from '../shared/ipc.js';
 import { nextConvState, type ConvState, type ConvEvent } from '../shared/conv-state.js';
 
 declare global {
@@ -29,13 +29,15 @@ declare global {
       onLoading(cb: () => void): void;
       onScreenshot(cb: (dataUrl: string) => void): void;
       onReplyChunk(cb: (replySoFar: string) => void): void;
-      onError(cb: (msg: string) => void): void;
+      onError(cb: (err: ClassifiedErrorDTO) => void): void;
       onTranscript(cb: (text: string) => void): void;
       onVoiceError(cb: (msg: string) => void): void;
       onTtsChunk(cb: (base64: string) => void): void;
       onTtsDone(cb: () => void): void;
-      getSettings(key?: string): Promise<Record<string, unknown>>;
-      saveSettings(settings: Record<string, unknown>): Promise<void>;
+      getConfig(): Promise<ZuitiConfigDTO>;
+      setConfig(patch: Partial<ZuitiConfigDTO>): Promise<ZuitiConfigDTO>;
+      testConnection(service: 'llm' | 'asr' | 'tts' | 'all'): Promise<HealthResultDTO[]>;
+      onConnectionStatus(cb: (health: HealthResultDTO[]) => void): void;
       getHistory(limit?: number): Promise<unknown[]>;
       clearHistory(): Promise<void>;
     };
@@ -499,9 +501,9 @@ api.onResult((dto) => {
   $voiceState.hidden = true;
 });
 
-api.onError((msg) => {
-  updateAssistantStream('出错了：' + msg);
-  finishAssistantTurn({ primary: { text: '出错了：' + msg }, items: [] });
+api.onError((err) => {
+  updateAssistantStream('出错了：' + err.userMessage);
+  finishAssistantTurn({ primary: { text: '出错了：' + err.userMessage }, items: [] });
   $go.disabled = false;
   $voiceState.hidden = true;
   applyEvent('turnError');
@@ -621,16 +623,16 @@ function bindCopy(btn: HTMLButtonElement, text: string): void {
 $text.focus();
 
 // ============ 设置面板 ============
-const $settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
-const $settingsPanel = document.getElementById('settingsPanel') as HTMLElement;
-const $settingsClose = document.getElementById('settingsClose') as HTMLButtonElement;
-const $settingDefaultStyle = document.getElementById('settingDefaultStyle') as HTMLSelectElement;
-const $settingTts = document.getElementById('settingTts') as HTMLInputElement;
-const $settingWakeThreshold = document.getElementById('settingWakeThreshold') as HTMLInputElement;
-const $settingModel = document.getElementById('settingModel') as HTMLElement;
+const $ = (id: string): HTMLElement | null => document.getElementById(id);
+const $settingsBtn = $('settingsBtn') as HTMLButtonElement;
+const $settingsPanel = $('settingsPanel') as HTMLElement;
+const $settingsClose = $('settingsClose') as HTMLButtonElement;
+const $settingDefaultStyle = $('settingDefaultStyle') as HTMLSelectElement;
+const $settingTts = $('settingTts') as HTMLInputElement;
+const $settingWakeThreshold = $('settingWakeThreshold') as HTMLInputElement;
 
 $settingsBtn?.addEventListener('click', () => {
-  void loadSettings();
+  void loadSettingsUI();
   $settingsPanel.hidden = false;
 });
 
@@ -638,48 +640,71 @@ $settingsClose?.addEventListener('click', () => {
   $settingsPanel.hidden = true;
 });
 
-$settingDefaultStyle?.addEventListener('change', () => {
-  void saveSetting('defaultStyle', $settingDefaultStyle.value);
-});
-
-$settingTts?.addEventListener('change', () => {
-  void saveSetting('ttsEnabled', $settingTts.checked);
-});
-
-$settingWakeThreshold?.addEventListener('input', () => {
-  void saveSetting('wakeThreshold', Number($settingWakeThreshold.value) / 100);
-});
-
-async function loadSettings(): Promise<void> {
+async function loadSettingsUI(): Promise<void> {
   try {
-    const settings = await api.getSettings();
-    if (settings.defaultStyle && typeof settings.defaultStyle === 'string') {
-      $settingDefaultStyle.value = settings.defaultStyle;
-      setCurrentStyle(settings.defaultStyle as ReplyStyle);
-    }
-    if (typeof settings.ttsEnabled === 'boolean') {
-      $settingTts.checked = settings.ttsEnabled;
-    }
-    if (typeof settings.wakeThreshold === 'number') {
-      $settingWakeThreshold.value = String(Math.round((settings.wakeThreshold as number) * 100));
+    const c = await api.getConfig();
+    ($('cfgApiKey') as HTMLInputElement).value = c.credential.apiKey ?? '';
+    ($('cfgBaseUrl') as HTMLInputElement).value = c.credential.baseURL ?? '';
+    ($('cfgLlmModel') as HTMLInputElement).value = c.llm.model ?? '';
+    ($('cfgAsrModel') as HTMLInputElement).value = c.asr.model ?? '';
+    ($('cfgTtsModel') as HTMLInputElement).value = c.tts.model ?? '';
+    ($('cfgTtsVoice') as HTMLInputElement).value = c.tts.voice ?? '';
+    $settingDefaultStyle.value = c.ui.defaultStyle ?? 'empathy';
+    setCurrentStyle((c.ui.defaultStyle as ReplyStyle) ?? DEFAULT_STYLE);
+    $settingTts.checked = c.ui.ttsEnabled ?? true;
+    if (typeof c.advanced.wakeThreshold === 'number') {
+      $settingWakeThreshold.value = String(Math.round(c.advanced.wakeThreshold * 100));
     }
   } catch (err) {
     rlog('warn', 'settings.load.failed', { msg: err instanceof Error ? err.message : String(err) });
   }
 }
 
-async function saveSetting(key: string, value: unknown): Promise<void> {
-  try {
-    await api.saveSettings({ [key]: value });
-  } catch (err) {
-    rlog('warn', 'settings.save.failed', { msg: err instanceof Error ? err.message : String(err) });
-  }
-}
+// 凭证
+$('cfgApiKey')?.addEventListener('change', (e) => {
+  void api.setConfig({ credential: { apiKey: (e.target as HTMLInputElement).value.trim() || undefined } });
+});
+$('cfgBaseUrl')?.addEventListener('change', (e) => {
+  void api.setConfig({ credential: { baseURL: (e.target as HTMLInputElement).value.trim() || undefined } });
+});
 
-// Load model name display
-void api.capabilities().then(() => {
-  $settingModel.textContent = 'MiMo v2.5';
-}).catch(() => {});
+// 模型
+$('cfgLlmModel')?.addEventListener('change', (e) => {
+  void api.setConfig({ llm: { model: (e.target as HTMLInputElement).value.trim() || undefined } });
+});
+$('cfgAsrModel')?.addEventListener('change', (e) => {
+  void api.setConfig({ asr: { model: (e.target as HTMLInputElement).value.trim() || undefined } });
+});
+$('cfgTtsModel')?.addEventListener('change', (e) => {
+  void api.setConfig({ tts: { model: (e.target as HTMLInputElement).value.trim() || undefined } });
+});
+$('cfgTtsVoice')?.addEventListener('change', (e) => {
+  void api.setConfig({ tts: { voice: (e.target as HTMLInputElement).value.trim() || undefined } });
+});
+
+// 偏好
+$settingDefaultStyle?.addEventListener('change', () => {
+  void api.setConfig({ ui: { defaultStyle: $settingDefaultStyle.value } });
+});
+$settingTts?.addEventListener('change', () => {
+  void api.setConfig({ ui: { ttsEnabled: $settingTts.checked } });
+});
+$settingWakeThreshold?.addEventListener('input', () => {
+  void api.setConfig({ advanced: { wakeThreshold: Number($settingWakeThreshold.value) / 100 } });
+});
+
+// 测试连接
+$('testLlm')?.addEventListener('click', async () => {
+  const el = $('testLlmResult')!;
+  el.textContent = '测试中…';
+  try {
+    const results = await api.testConnection('llm');
+    const r = results[0];
+    el.textContent = r.ok ? '✅ 连接正常' : '❌ ' + r.message;
+  } catch (err) {
+    el.textContent = '❌ ' + (err instanceof Error ? err.message : String(err));
+  }
+});
 
 // ============ 历史记录 ============
 const $historyToggle = document.getElementById('historyToggle') as HTMLButtonElement;

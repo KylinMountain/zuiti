@@ -85,36 +85,53 @@
         </button>
       </div>
       <div class="settings-panel__body">
-        <!-- Default Style -->
-        <div class="settings-item">
-          <label class="settings-item__label">默认风格</label>
-          <select class="settings-item__select" id="settingDefaultStyle">
-            <option value="empathy">💕 高情商</option>
-            <option value="roast">🔥 毒舌</option>
-            <option value="formal">👔 正式</option>
-            <option value="casual">😎 随意</option>
-            <option value="english">🌍 英文</option>
-          </select>
+        <!-- 凭证 -->
+        <div class="settings-group">
+          <div class="settings-group__title">凭证</div>
+          <label class="settings-item"><span>API Key</span><input type="password" id="cfgApiKey" placeholder="tp-..." /></label>
+          <label class="settings-item"><span>Base URL</span><input type="text" id="cfgBaseUrl" placeholder="https://.../v1" /></label>
+          <div class="settings-item settings-item--actions">
+            <button class="settings-test" id="testLlm" type="button">测试连接</button>
+            <span class="settings-test__result" id="testLlmResult"></span>
+          </div>
         </div>
-        <!-- TTS Toggle -->
-        <div class="settings-item">
-          <label class="settings-item__label">语音朗读 (TTS)</label>
-          <label class="settings-item__toggle">
-            <input type="checkbox" id="settingTts" checked />
-            <span class="settings-item__toggle-track"></span>
-          </label>
+        <!-- 模型 -->
+        <div class="settings-group">
+          <div class="settings-group__title">模型</div>
+          <label class="settings-item"><span>LLM 模型</span><input type="text" id="cfgLlmModel" placeholder="mimo-v2.5-pro" /></label>
+          <label class="settings-item"><span>ASR 模型</span><input type="text" id="cfgAsrModel" placeholder="mimo-v2.5-asr" /></label>
+          <label class="settings-item"><span>TTS 模型</span><input type="text" id="cfgTtsModel" placeholder="mimo-v2.5-tts" /></label>
+          <label class="settings-item"><span>TTS 音色</span><input type="text" id="cfgTtsVoice" placeholder="冰糖" /></label>
         </div>
-        <!-- Wake Threshold -->
-        <div class="settings-item">
-          <label class="settings-item__label">唤醒灵敏度</label>
-          <input type="range" class="settings-item__range" id="settingWakeThreshold" min="0" max="100" value="50" />
+        <!-- 偏好 -->
+        <div class="settings-group">
+          <div class="settings-group__title">偏好</div>
+          <!-- Default Style -->
+          <div class="settings-item">
+            <label class="settings-item__label">默认风格</label>
+            <select class="settings-item__select" id="settingDefaultStyle">
+              <option value="empathy">💕 高情商</option>
+              <option value="roast">🔥 毒舌</option>
+              <option value="formal">👔 正式</option>
+              <option value="casual">😎 随意</option>
+              <option value="english">🌍 英文</option>
+            </select>
+          </div>
+          <!-- TTS Toggle -->
+          <div class="settings-item">
+            <label class="settings-item__label">语音朗读 (TTS)</label>
+            <label class="settings-item__toggle">
+              <input type="checkbox" id="settingTts" checked />
+              <span class="settings-item__toggle-track"></span>
+            </label>
+          </div>
+          <!-- Wake Threshold -->
+          <div class="settings-item">
+            <label class="settings-item__label">唤醒灵敏度</label>
+            <input type="range" class="settings-item__range" id="settingWakeThreshold" min="0" max="100" value="50" />
+          </div>
         </div>
-        <!-- Provider Info -->
-        <div class="settings-item settings-item--info">
-          <span class="settings-item__label">模型</span>
-          <span class="settings-item__value" id="settingModel">--</span>
-        </div>
-        <!-- Version -->
+        <!-- 版本 -->
         <div class="settings-item settings-item--info">
           <span class="settings-item__label">版本</span>
           <span class="settings-item__value">0.1.0</span>
