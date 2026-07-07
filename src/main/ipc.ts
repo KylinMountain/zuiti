@@ -12,18 +12,19 @@
  * Plan 7: 核心逻辑抽到 modules/skill-runner.ts（不依赖 BrowserWindow），本文件只负责
  * IPC 编排（send/chunk/TTS）+ 截屏 + 错误回送。
  */
-import { app, ipcMain, type BrowserWindow } from 'electron';
+import { app, ipcMain, shell, type BrowserWindow } from 'electron';
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { log, type LogLevel } from '../core/log.js';
 import { synthesizeSpeechStream, transcribeAudio, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
 import { captureScreen, pngToDataUrl } from '../core/screenshot.js';
 import { MiraConversation } from '../modules/mira/conversation.js';
-import { join } from 'node:path';
-import { CHANNELS, type Capabilities, type WakeRuntime, type ReplyStyle } from '../shared/ipc.js';
+import { join, resolve } from 'node:path';
+import { CHANNELS, type Capabilities, type WakeRuntime, type ReplyStyle, type DiagStatsDTO } from '../shared/ipc.js';
 import { loadConfig, saveConfig } from '../core/config-store.js';
 import { initRuntimeConfig, getEffectiveConfig } from '../core/runtime-config.js';
 import { checkAll, checkLlm, checkAsr, checkTts, type HealthResult } from '../core/service-health.js';
 import { classifyError, isClassifiedError } from '../core/errors.js';
+import { readRecentRuns, aggregateRuns, buildDiagnostics } from '../core/diagnostics.js';
 
 /**
  * 注册 coach + voice + capabilities IPC handlers。主进程启动时调用一次。
@@ -261,6 +262,21 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     for (const r of results) lastHealth = [...lastHealth.filter((h) => h.service !== r.service), r];
     mainWindow.webContents.send(CHANNELS.configStatus, lastHealth);
     return results;
+  });
+
+  // ---- Diagnostics IPC ----
+  const logsDir = resolve(process.cwd(), 'logs');
+  const versions = { version: app.getVersion(), electron: process.versions.electron, node: process.versions.node };
+
+  ipcMain.handle(CHANNELS.diagGet, (): DiagStatsDTO => aggregateRuns(readRecentRuns(logsDir, 20)));
+  ipcMain.on(CHANNELS.diagOpenLogs, () => { void shell.openPath(logsDir); });
+  ipcMain.handle(CHANNELS.diagExport, (): string => {
+    const diag = buildDiagnostics(logsDir, getEffectiveConfig(), versions, 20);
+    const file = join(logsDir, `diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    writeFileSync(file, JSON.stringify(diag, null, 2) + '\n', 'utf8');
+    shell.showItemInFolder(file);
+    log.info('diag.exported', { file });
+    return file;
   });
 
   return { endConversation };

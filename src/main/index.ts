@@ -6,13 +6,14 @@
  */
 import { app, session, ipcMain, type BrowserWindow } from 'electron';
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHudWindow, showHud, toggleHud } from './window.js';
 import { createTray, destroyTray } from './tray.js';
 import { registerCoachIpc } from './ipc.js';
 import { CHANNELS, type WakeRuntime } from '../shared/ipc.js';
 import { log } from '../core/log.js';
+import { writeCrashReport } from '../core/crash.js';
 import { loadConfig, saveConfig } from '../core/config-store.js';
 import { initRuntimeConfig } from '../core/runtime-config.js';
 
@@ -107,6 +108,29 @@ app.whenReady().then(() => {
   endConversation = coachIpc.endConversation;
   createTray(toggle);
   log.info('ipc.registered');
+
+  const logsDir = resolve(process.cwd(), 'logs');
+  const versionCtx = { version: app.getVersion(), electron: process.versions.electron, node: process.versions.node };
+  function notifyCrash(message: string): void { hud?.webContents.send(CHANNELS.crashNotice, { message }); }
+
+  process.on('uncaughtException', (err) => {
+    const p = writeCrashReport(logsDir, err, { source: 'uncaughtException', ...versionCtx });
+    log.error('crash.uncaught', { msg: err instanceof Error ? err.message : String(err), report: p });
+    notifyCrash('出了点内部错误，已记录（可在设置→诊断导出）。');
+    // 不 process.exit —— 托盘常驻，保活。
+  });
+  process.on('unhandledRejection', (reason) => {
+    const p = writeCrashReport(logsDir, reason, { source: 'unhandledRejection', ...versionCtx });
+    log.error('crash.unhandledRejection', { msg: String(reason), report: p });
+  });
+
+  let renderGoneCount = 0;
+  hud.webContents.on('render-process-gone', (_e, details) => {
+    const p = writeCrashReport(logsDir, new Error(`render-process-gone: ${details.reason}`), { source: 'renderProcessGone', ...versionCtx, extra: { reason: details.reason } });
+    log.error('crash.renderGone', { reason: details.reason, report: p });
+    if (++renderGoneCount <= 3) { log.info('crash.renderGone.reload', { attempt: renderGoneCount }); hud?.reload(); }
+    else { log.warn('crash.renderGone.giveup', { count: renderGoneCount }); }
+  });
 
   // 本地唤醒词命中（渲染层 openWakeWord 检出 "Jarvis"）→ 与热键同样的唤起。
   ipcMain.on(CHANNELS.wake, () => {
