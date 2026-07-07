@@ -122,7 +122,12 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
         lastHealth = [...lastHealth.filter((x) => x.service !== 'llm'), h];
         mainWindow.webContents.send(CHANNELS.configStatus, lastHealth);
         if (!h.ok) {
-          mainWindow.webContents.send(CHANNELS.coachError, classifyError({ httpStatus: h.httpStatus, cause: h.message }));
+          mainWindow.webContents.send(CHANNELS.coachError, {
+            kind: h.kind ?? 'unknown',
+            userMessage: h.message,
+            retryable: h.kind === 'network' || h.kind === 'server',
+            fixAction: h.kind === 'authInvalid' ? 'openSettings' : undefined,
+          });
           return;
         }
       }
