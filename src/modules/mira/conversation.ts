@@ -9,8 +9,19 @@
  */
 import { createMiraSession } from './session.js';
 import { log, newRunId, writeRunSummary, type RunSummary } from '../../core/log.js';
+import { classifyError } from '../../core/errors.js';
 import type { UniversalOutput, ReplyStyle } from '../../shared/ipc.js';
 import type { EmitResult } from '../../core/emit-tool.js';
+
+/** 从 provider 错误对象/文本里尽力抠出 HTTP 状态码。 */
+function extractHttpStatus(e: unknown): number | undefined {
+  const anyE = e as { status?: number; statusCode?: number; response?: { status?: number } };
+  if (typeof anyE?.status === 'number') return anyE.status;
+  if (typeof anyE?.statusCode === 'number') return anyE.statusCode;
+  if (typeof anyE?.response?.status === 'number') return anyE.response.status;
+  const m = String(e).match(/\b(4\d\d|5\d\d)\b/);
+  return m ? Number(m[1]) : undefined;
+}
 
 export interface RunSkillCallbacks {
   onReplyChunk?(primarySoFar: string): void;
@@ -88,6 +99,7 @@ export class MiraConversation {
     let skillRead: string | undefined;
     let ttsStarted = false;
     let ttsStartedLen = 0;
+    let providerError: unknown = null;
 
     const unsub = session.subscribe((e) => {
       const j = safeJson(e);
@@ -96,6 +108,18 @@ export class MiraConversation {
         skillRead = sm[1];
         log.info('skill.selected', { runId, skillId: skillRead, latencyMs: Date.now() - startTs });
       }
+      // Capture pi provider errors: e.message.stopReason === 'error' (e.g. 401 Invalid API Key)
+      const msg = (e as { message?: { stopReason?: string; errorMessage?: string } }).message;
+      if (msg?.stopReason === 'error' && msg.errorMessage && !providerError) {
+        providerError = msg.errorMessage;
+      }
+      // Fallback: top-level errorEvent or error field
+      const errTop = (e as { errorEvent?: { error?: unknown; message?: string }; error?: unknown }).errorEvent
+        ?? (e as { error?: unknown }).error;
+      if (errTop && !providerError) providerError = errTop;
+      // Fallback: assistantMessageEvent.type === 'error'
+      const ameErr = (e as { assistantMessageEvent?: { type?: string; error?: unknown; message?: string } }).assistantMessageEvent;
+      if (ameErr?.type === 'error' && !providerError) providerError = ameErr.error ?? ameErr.message ?? 'assistant error';
       const ame = (e as { assistantMessageEvent?: { type?: string; delta?: string } }).assistantMessageEvent;
       if (ame?.type === 'text_delta' && ame.delta) {
         rawPrimary += ame.delta;
@@ -131,6 +155,12 @@ export class MiraConversation {
       throw err;
     } finally {
       unsub();
+    }
+
+    if (providerError) {
+      const httpStatus = extractHttpStatus(providerError);
+      log.warn('conversation.provider-error', { runId, httpStatus, detail: String(providerError).slice(0, 200) });
+      throw classifyError({ httpStatus, cause: providerError });
     }
 
     const emit = this.getEmit?.() ?? null;
