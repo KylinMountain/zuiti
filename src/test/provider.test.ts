@@ -30,7 +30,7 @@ test('resolveLlmConfig: 无 env 时回退默认 model', () => {
     const cfg = resolveLlmConfig();
     assert.equal(cfg.apiKey, undefined);
     assert.equal(cfg.baseURL, undefined);
-    assert.equal(cfg.model, 'gpt-4o-mini');
+    assert.equal(cfg.model, 'mimo-v2.5-pro');
   } finally {
     if (savedKey !== undefined) process.env.LLM_API_KEY = savedKey;
     if (savedUrl !== undefined) process.env.LLM_BASE_URL = savedUrl;

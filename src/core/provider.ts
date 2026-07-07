@@ -7,71 +7,37 @@
  * - MiMo 关 thinking（见 mira-model.ts）：挂工具时开 thinking 首字 21-32s，关掉 <1s 且"先文本流式 → 后 emit_result"顺序正确。
  * - 结构化输出走 emit_result 工具（不用 SDK json_schema，MiMo 不支持）；主体 primary 走文本流式。
  *
- * 配置来源（优先级：config.json > env > 默认）：
+ * 配置来源（优先级：userData > env > 默认，见 runtime-config）：
  * - LLM_API_KEY   （.env）小米 LLM key，createMiraModelRegistry 必填（缺则抛错）
  * - LLM_BASE_URL  （.env）OpenAI 兼容端点（如 MiMo），createMiraModelRegistry 必填（缺则抛错）
- * - LLM_MODEL     （.env）模型名；缺省 gpt-4o-mini
+ * - LLM_MODEL     （.env）模型名；缺省见 runtime-config DEFAULTS
  * - ASR_API_KEY / TTS_API_KEY （.env）语音 harness 用，本层不消费，见 src/core/voice.ts
  */
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import { buildMiraModel } from './mira-model.js';
+import { getCredential, getLlmModel } from './runtime-config.js';
 
-// 模块导入即加载 .env：保证 getCoachModelName() 在 Agent 构造时（导入期）能读到 env。
+// 模块导入即加载 .env：保证 env 在 runtime-config lazy-init 前可读。
 // dotenv.config() 幂等，重复调用无副作用。
 loadDotenv();
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** provider 配置（config.json，可选，覆盖 env）。 */
-export interface ProviderConfig {
-  baseURL?: string;
-  apiKey?: string;
-  apiKeyEnv?: string;
-  model?: string;
-}
-
-const DEFAULT_MODEL = 'gpt-4o-mini';
-
-/** 同步读取 config.json；缺失或损坏时返回空配置（不抛错，保证模块导入无副作用）。 */
-export function loadProviderConfig(): ProviderConfig {
-  const paths = [
-    resolve(__dirname, '../../config.json'),
-    resolve(process.cwd(), 'config.json'),
-  ];
-  for (const p of paths) {
-    try {
-      const raw = readFileSync(p, 'utf8');
-      return JSON.parse(raw) as ProviderConfig;
-    } catch {
-      // try next path
-    }
-  }
-  return {};
-}
-
-/** 解析后的有效 LLM 配置（config.json > env > 默认）。 */
+/** 解析后的有效 LLM 配置（userData > env > 默认）。 */
 export interface ResolvedLlmConfig {
   apiKey?: string;
   baseURL?: string;
   model: string;
 }
 
-/** 拿到有效 LLM 配置：config.json 优先，否则读 env（LLM_API_KEY / LLM_BASE_URL / LLM_MODEL）。 */
+/** 有效 LLM 配置（userData > env > 默认，见 runtime-config）。 */
 export function resolveLlmConfig(): ResolvedLlmConfig {
-  const cfg = loadProviderConfig();
-  const apiKey = cfg.apiKey ?? (cfg.apiKeyEnv ? process.env[cfg.apiKeyEnv] : undefined) ?? process.env.LLM_API_KEY;
-  const baseURL = cfg.baseURL ?? process.env.LLM_BASE_URL;
-  const model = cfg.model ?? process.env.LLM_MODEL ?? DEFAULT_MODEL;
-  return { apiKey, baseURL, model };
+  const { apiKey, baseURL } = getCredential();
+  return { apiKey, baseURL, model: getLlmModel() };
 }
 
 /**
  * Plan 8：构造关 thinking 的 MiMo session 底座（pi）：authStorage + modelRegistry + 解析出的 model。
- * 复用 resolveLlmConfig（config.json > env）。createMiraSession 用它。
+ * 复用 resolveLlmConfig（userData > env > 默认）。createMiraSession 用它。
  * @param hasScreenshot 带截图时切换到多模态模型（mimo-v2.5，pro 不支持图片）
  */
 export function createMiraModelRegistry(hasScreenshot = false) {

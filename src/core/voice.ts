@@ -9,11 +9,8 @@
  * 不引入新依赖。
  */
 import { resolveLlmConfig } from './provider.js';
+import { getAsr, getTts } from './runtime-config.js';
 import { log } from './log.js';
-
-const ASR_MODEL = 'mimo-v2.5-asr';
-const TTS_MODEL = 'mimo-v2.5-tts';
-const DEFAULT_TTS_VOICE = '冰糖'; // 中文女声，预置音色
 
 /** ASR 语种。 */
 export type AsrLanguage = 'auto' | 'zh' | 'en';
@@ -44,9 +41,9 @@ export function mimeToAudioMime(mime: string): AudioMime {
 }
 
 /** 构造 ASR 请求体（纯函数，可单测）。 */
-export function buildAsrBody(audioDataUrl: string, language: AsrLanguage = 'zh'): unknown {
+export function buildAsrBody(audioDataUrl: string, model: string, language: AsrLanguage = 'zh'): unknown {
   return {
-    model: ASR_MODEL,
+    model,
     messages: [
       {
         role: 'user',
@@ -58,10 +55,10 @@ export function buildAsrBody(audioDataUrl: string, language: AsrLanguage = 'zh')
 }
 
 /** 构造 TTS 请求体（纯函数，可单测）。文本放 role:assistant，风格用 (风格) 标签。 */
-export function buildTtsBody(text: string, style?: string, voice: string = DEFAULT_TTS_VOICE): unknown {
+export function buildTtsBody(text: string, model: string, style?: string, voice = '冰糖'): unknown {
   const content = style ? `(${style})${text}` : text;
   return {
-    model: TTS_MODEL,
+    model,
     messages: [{ role: 'assistant', content }],
     audio: { format: 'pcm16', voice },
     stream: true,
@@ -77,14 +74,15 @@ export function buildTtsBody(text: string, style?: string, voice: string = DEFAU
 export async function transcribeAudio(
   bytes: Uint8Array,
   mime: AudioMime = 'audio/wav',
-  language: AsrLanguage = 'zh',
+  language?: AsrLanguage,
 ): Promise<string> {
   const { apiKey, baseURL } = resolveLlmConfig();
   if (!apiKey || !baseURL) throw new Error('ASR 需要 LLM_API_KEY + LLM_BASE_URL');
 
+  const asr = getAsr();
   const dataUrl = audioToDataUrl(bytes, mime);
-  const body = buildAsrBody(dataUrl, language);
-  log.info('asr.request', { bytes: bytes.length, language });
+  const body = buildAsrBody(dataUrl, asr.model, language ?? asr.lang);
+  log.info('asr.request', { bytes: bytes.length, language: language ?? asr.lang });
 
   const resp = await fetch(`${baseURL}/chat/completions`, {
     method: 'POST',
@@ -114,7 +112,8 @@ export async function* synthesizeSpeechStream(
   const { apiKey, baseURL } = resolveLlmConfig();
   if (!apiKey || !baseURL) throw new Error('TTS 需要 LLM_API_KEY + LLM_BASE_URL');
 
-  const body = buildTtsBody(text, style);
+  const tts = getTts();
+  const body = buildTtsBody(text, tts.model, style, tts.voice);
   log.info('tts.request', { textLen: text.length, style: style ?? '' });
 
   const resp = await fetch(`${baseURL}/chat/completions`, {

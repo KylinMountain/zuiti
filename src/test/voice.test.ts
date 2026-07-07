@@ -40,7 +40,7 @@ test('mimeToAudioMime: 未知 mime 回退 wav', () => {
 });
 
 test('buildAsrBody: 结构正确（model + input_audio + asr_options）', () => {
-  const body = buildAsrBody('data:audio/wav;base64,AAA', 'zh') as {
+  const body = buildAsrBody('data:audio/wav;base64,AAA', 'mimo-v2.5-asr', 'zh') as {
     model: string;
     messages: { role: string; content: { type: string; input_audio: { data: string } }[] }[];
     asr_options: { language: string };
@@ -53,12 +53,12 @@ test('buildAsrBody: 结构正确（model + input_audio + asr_options）', () => 
 });
 
 test('buildAsrBody: 默认语种 zh', () => {
-  const body = buildAsrBody('data:x') as { asr_options: { language: string } };
+  const body = buildAsrBody('data:x', 'mimo-v2.5-asr') as { asr_options: { language: string } };
   assert.equal(body.asr_options.language, 'zh');
 });
 
 test('buildTtsBody: 无风格时文本原样放 assistant content', () => {
-  const body = buildTtsBody('你好') as {
+  const body = buildTtsBody('你好', 'mimo-v2.5-tts') as {
     model: string;
     messages: { role: string; content: string }[];
     stream: boolean;
@@ -73,14 +73,14 @@ test('buildTtsBody: 无风格时文本原样放 assistant content', () => {
 });
 
 test('buildTtsBody: 有风格时加 (风格) 前缀', () => {
-  const body = buildTtsBody('你好', '俏皮') as {
+  const body = buildTtsBody('你好', 'mimo-v2.5-tts', '俏皮') as {
     messages: { content: string }[];
   };
   assert.equal(body.messages[0]?.content, '(俏皮)你好');
 });
 
 test('buildTtsBody: 自定义 voice 透传', () => {
-  const body = buildTtsBody('你好', undefined, 'Chloe') as {
+  const body = buildTtsBody('你好', 'mimo-v2.5-tts', undefined, 'Chloe') as {
     audio: { voice: string };
   };
   assert.equal(body.audio.voice, 'Chloe');
