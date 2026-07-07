@@ -4,7 +4,7 @@
  * 渲染层只能通过 window.zuiti 调用，无法直接访问 Node / Electron。
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import { CHANNELS, type Capabilities, type UniversalOutput, type ReplyStyle } from '../shared/ipc.js';
+import { CHANNELS, type Capabilities, type UniversalOutput, type ReplyStyle, type ClassifiedErrorDTO, type HealthResultDTO, type ZuitiConfigDTO } from '../shared/ipc.js';
 
 const api = {
   /** 渲染层日志转发到主进程（写入同一个日志文件）。 */
@@ -46,8 +46,8 @@ const api = {
     ipcRenderer.on(CHANNELS.coachReplyChunk, (_e, replySoFar: string) => cb(replySoFar));
   },
   /** 监听错误。 */
-  onError: (cb: (msg: string) => void): void => {
-    ipcRenderer.on(CHANNELS.coachError, (_e, msg: string) => cb(msg));
+  onError: (cb: (err: ClassifiedErrorDTO) => void): void => {
+    ipcRenderer.on(CHANNELS.coachError, (_e, err: ClassifiedErrorDTO) => cb(err));
   },
   /** 监听 ASR 转写结果（push-to-talk 流程）。 */
   onTranscript: (cb: (text: string) => void): void => {
@@ -85,14 +85,28 @@ const api = {
   clearHistory: (): Promise<void> => {
     return ipcRenderer.invoke(CHANNELS.historyClear);
   },
-  /** 读取设置。key 不传返回全部设置。 */
+  /**
+   * 读取设置。key 不传返回全部设置。
+   * @deprecated Use getConfig() instead. Will be removed in Task 9.
+   */
   getSettings: (key?: string): Promise<Record<string, unknown>> => {
     return ipcRenderer.invoke(CHANNELS.settingsGet, key);
   },
-  /** 写入设置（部分更新）。 */
+  /**
+   * 写入设置（部分更新）。
+   * @deprecated Use setConfig() instead. Will be removed in Task 9.
+   */
   saveSettings: (settings: Record<string, unknown>): Promise<void> => {
     return ipcRenderer.invoke(CHANNELS.settingsSet, settings);
   },
+  /** 读取完整配置（key 脱敏由主进程决定）。 */
+  getConfig: (): Promise<ZuitiConfigDTO> => ipcRenderer.invoke(CHANNELS.configGet),
+  /** 部分更新配置（写 userData + 重载 runtime-config）。 */
+  setConfig: (patch: Partial<ZuitiConfigDTO>): Promise<ZuitiConfigDTO> => ipcRenderer.invoke(CHANNELS.configSet, patch),
+  /** 连接自检（service: 'llm'|'asr'|'tts'|'all'）。 */
+  testConnection: (service: 'llm' | 'asr' | 'tts' | 'all'): Promise<HealthResultDTO[]> => ipcRenderer.invoke(CHANNELS.configTest, service),
+  /** 监听连接状态变化推送（HealthResult[]）。 */
+  onConnectionStatus: (cb: (health: HealthResultDTO[]) => void): void => { ipcRenderer.on(CHANNELS.configStatus, (_e, h: HealthResultDTO[]) => cb(h)); },
 };
 
 contextBridge.exposeInMainWorld('zuiti', api);

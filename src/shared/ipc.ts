@@ -67,10 +67,22 @@ export const CHANNELS = {
   historyList: 'history:list',
   /** 渲染 → 主：清除所有历史记录。 */
   historyClear: 'history:clear',
-  /** 渲染 → 主：读取设置（key 或全部）。 */
+  /** 渲染 → 主：读取设置（key 或全部）。
+   * @deprecated Use configGet instead. Will be removed in Task 8.
+   */
   settingsGet: 'settings:get',
-  /** 渲染 → 主：写入设置。 */
+  /** 渲染 → 主：写入设置。
+   * @deprecated Use configSet instead. Will be removed in Task 8.
+   */
   settingsSet: 'settings:set',
+  /** 渲染 → 主：读取完整配置（key 脱敏由主进程决定）。 */
+  configGet: 'config:get',
+  /** 渲染 → 主：部分更新配置（写 userData + 重载 runtime-config）。 */
+  configSet: 'config:set',
+  /** 渲染 → 主：连接自检（service: 'llm'|'asr'|'tts'|'all'）。 */
+  configTest: 'config:test',
+  /** 主 → 渲染：连接状态变化推送（HealthResult[]）。 */
+  configStatus: 'config:status',
 } as const;
 
 /** 唤醒词运行所需：openWakeWord 三个模型（base64）+ 阈值，由主进程下发给渲染。 */
@@ -129,4 +141,19 @@ export interface Capabilities {
   tts: boolean;
   /** 非 null 时渲染层启动本地唤醒词监听"Jarvis"（openWakeWord，离线，无 Key）。 */
   wake: WakeRuntime | null;
+  /** 是否已有有效配置（apiKey+baseURL 齐 + 最近 checkLlm 通过）。Task 8 将填充此字段。 */
+  configured?: boolean;
+  /** 各服务最近一次自检结果（可空）。 */
+  health?: HealthResultDTO[];
+}
+
+/** 与 core/errors.ts、core/service-health.ts、core/config-store.ts 对应的跨进程 DTO（结构一致，供渲染层类型使用）。 */
+export type ErrorKind = 'authInvalid' | 'rateLimited' | 'network' | 'server' | 'asrEmpty' | 'ttsFailed' | 'unknown';
+export interface ClassifiedErrorDTO { kind: ErrorKind; userMessage: string; retryable: boolean; fixAction?: 'openSettings'; }
+export interface HealthResultDTO { service: 'llm' | 'asr' | 'tts'; ok: boolean; httpStatus?: number; kind?: ErrorKind; message: string; latencyMs: number; }
+export interface ZuitiConfigDTO {
+  credential: { apiKey?: string; baseURL?: string };
+  llm: { model?: string }; asr: { model?: string; lang?: 'zh' | 'auto' | 'en' };
+  tts: { model?: string; voice?: string }; advanced: { wakeThreshold?: number };
+  ui: { defaultStyle?: string; ttsEnabled?: boolean };
 }
