@@ -19,7 +19,7 @@ Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
 
 - **Types**：跨进程类型在 `src/shared/ipc.ts`——`CHANNELS` + `UniversalOutput` + `UniversalItem` + `WakeRuntime` + `Capabilities`。零运行时依赖（渲染层 DOM lib 与主进程都编译它）。
 - **Config / Providers**：`src/core/provider.ts`——读 `.env`（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`），用 pi 的 `ModelRegistry.inMemory(authStorage).registerProvider('mimo', …)` 注册 MiMo（OpenAI 兼容端点）。`src/core/mira-model.ts`——MiMo model 元数据（**关 thinking**）。
-- **Core**：`src/core/`——harness 底座：`provider.ts`（接 MiMo）、`mira-model.ts`（关 thinking）、`emit-tool.ts`（`emit_result` 工具工厂）、`log.ts`（结构化日志 + `RunSummary`）、`voice.ts`（ASR/TTS）、`screenshot.ts`。
+- **Core**：`src/core/`——harness 底座：`provider.ts`（接 MiMo）、`mira-model.ts`（关 thinking）、`emit-tool.ts`（`emit_result` 工具工厂）、`log.ts`（结构化日志 + `RunSummary`）、`voice.ts`（ASR/TTS）、`screenshot.ts`、`errors.ts`（`classifyError` → `ErrorKind`：`authInvalid`/`networkError`/`serverError`/`unknown`）、`config-store.ts`（读写 `<userData>/zuiti-config.json`）、`runtime-config.ts`（合并生效配置，单一来源：userData > env > 默认）、`service-health.ts`（`checkLlm`/`checkAsr`/`checkTts`/`checkAll` 服务自检）。
 - **Modules**：`src/modules/`——嘴替 session + skill 流水线：
   - `mira/prompt.ts`——`MIRA_SYSTEM_PROMPT`（嘴替人格，替换 pi 默认 coding prompt）+ `skillsDir()`。
   - `mira/session.ts`——`createMiraSession`：组装单个 pi session（关 thinking MiMo + system prompt + skills 披露 + `tools:['read','emit_result']`）。
@@ -98,11 +98,13 @@ Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
 - 每个 `skills/<id>/SKILL.md` 至少含 `name` + `description`（≤64 / ≤1024 字）。`description` 写清"做什么 + 何时用"，渐进式披露靠它路由。
 - 机械强制：architecture.test 断言 ≥3 个 skill 目录且各有 `name`/`description`。
 
-### 6. Provider 配置经 env（config.json > env > 默认）
+### 6. 配置来源（userData `zuiti-config.json` > env > 默认）
 
-- `resolveLlmConfig()`：`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`。
-- `provider.ts` 顶部 `loadDotenv()`：保证导入期能读到 env。
-- MiMo Token Plan：`https://token-plan-cn.xiaomimimo.com/v1` + `mimo-v2.5-pro`。
+- `src/core/config-store.ts`：读写 `<userData>/zuiti-config.json`（明文 JSON，自动 dir 注入，无 Electron 依赖）。
+- `src/core/runtime-config.ts`：`initRuntimeConfig(fileConfig, envVars)` 合并为单一来源，`getCredential()`/`getLlmModel()`/`getAsr()`/`getTts()`/`getUi()`/`getAdvanced()` 供其余 core 模块消费。
+- config.json 已退出历史舞台（旧 Plan 7 产物），配置文件固定为 `zuiti-config.json`（存于 Electron `app.getPath('userData')`）。
+- 优先级：应用内设置（文件）> `.env`（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`）> 硬编码默认值。
+- MiMo Token Plan 默认：`https://token-plan-cn.xiaomimimo.com/v1` + `mimo-v2.5-pro`。
 
 ## 当前数据模型（Plan 8 后）
 
@@ -140,7 +142,11 @@ src/
 │   ├── emit-tool.ts       # createEmitTool —— emit_result 工具工厂（TypeBox schema）
 │   ├── log.ts             # 结构化日志（LLM 可读 JSON lines）+ RunSummary（logs/runs/<runId>.json）
 │   ├── voice.ts           # MiMo ASR/TTS 客户端 + parseDataUrl/mimeToAudioMime
-│   └── screenshot.ts      # 截屏（Electron desktopCapturer 动态 import）
+│   ├── screenshot.ts      # 截屏（Electron desktopCapturer 动态 import）
+│   ├── errors.ts          # classifyError → ErrorKind（authInvalid/networkError/serverError/unknown）
+│   ├── config-store.ts    # 读写 <userData>/zuiti-config.json（ZuitiConfig，section 合并，无 Electron 依赖）
+│   ├── runtime-config.ts  # initRuntimeConfig + getCredential/getLlmModel/getAsr/getTts/getUi/getAdvanced
+│   └── service-health.ts  # checkLlm/checkAsr/checkTts/checkAll（最小请求自检 → HealthResult）
 ├── modules/               # 嘴替 session + skill 流水线
 │   ├── mira/
 │   │   ├── prompt.ts      # MIRA_SYSTEM_PROMPT（嘴替人格）+ skillsDir()

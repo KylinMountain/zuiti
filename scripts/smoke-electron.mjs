@@ -71,6 +71,34 @@ async function main() {
   const caps = await win.webContents.executeJavaScript('window.zuiti.capabilities()');
   log('smoke.caps', { asr: caps.asr, tts: caps.tts, wake: !!caps.wake });
 
+  // ── 错误呈现路径冒烟 ──────────────────────────────────────────────
+  // 注入故意错误的凭证，发一轮 → 断言收到 onError(authInvalid) + DOM 出现 .bubble--error
+  log('smoke.errorPath.start');
+  await win.webContents.executeJavaScript(`
+    window.__smokeErr = { error: null };
+    window.zuiti.onError((e) => { window.__smokeErr.error = e; });
+    window.zuiti.setConfig({ credential: { apiKey: 'bad', baseURL: 'https://x/v1' } });
+    true;
+  `);
+  await win.webContents.executeJavaScript(`window.zuiti.runCoach('test', false); true;`);
+  await waitFor(win, '!!window.__smokeErr.error', 20000, 'onError(authInvalid or network)');
+  const errEvt = await win.webContents.executeJavaScript('window.__smokeErr.error');
+  log('smoke.errorPath.onError', { kind: errEvt?.kind, msg: errEvt?.userMessage });
+  // DOM: .bubble--error 应已渲染
+  const hasErrorBubble = await win.webContents.executeJavaScript(
+    `document.querySelectorAll('.bubble--error').length > 0`
+  );
+  log('smoke.errorPath.dom', { hasErrorBubble });
+  if (!hasErrorBubble) throw new Error('smoke: .bubble--error not found in DOM after error');
+  log('smoke.errorPath.pass', { kind: errEvt?.kind });
+
+  // 恢复可用凭证（若有效 key 可用则继续两轮记忆测试）
+  const hasValidKey = !!process.env.LLM_API_KEY;
+  await win.webContents.executeJavaScript(`
+    window.zuiti.setConfig({ credential: { apiKey: ${JSON.stringify(process.env.LLM_API_KEY ?? '')}, baseURL: ${JSON.stringify(process.env.LLM_BASE_URL ?? '')} } });
+    true;
+  `);
+
   // 挂结果钩子（累积每轮 result / chunks / error）
   await win.webContents.executeJavaScript(`
     window.__smoke = { results: [], chunks: 0, error: null };
@@ -92,34 +120,43 @@ async function main() {
     return dto;
   }
 
-  const t1 = await runTurn(TURN1, 1);
-  await sleep(600);
-  const t2 = await runTurn(TURN2, 2);
-  const memoryRecalled = MEMORY_RE.test(t2.primary?.text ?? '');
-  await sleep(400);
+  // ── 两轮记忆路径（仅 hasValidKey 时运行）─────────────────────────
+  let t1, t2, memoryRecalled = false, dom = {};
+  if (hasValidKey) {
+    t1 = await runTurn(TURN1, 1);
+    await sleep(600);
+    t2 = await runTurn(TURN2, 2);
+    memoryRecalled = MEMORY_RE.test(t2.primary?.text ?? '');
+    await sleep(400);
 
-  // 读新版对话流 DOM（字段驱动渲染 → 气泡 + 候选卡）
-  const dom = await win.webContents.executeJavaScript(`
-    (() => {
-      const as = [...document.querySelectorAll('.bubble--assistant')];
-      const last = as[as.length - 1];
-      return {
-        assistantBubbles: as.length,
-        lastPrimary: last ? (last.querySelector('.bubble__text')?.textContent || '').slice(0, 120) : '',
-        lastItems: last ? last.querySelectorAll('.reply-item').length : 0,
-        emptyHidden: document.getElementById('transcriptEmpty')?.hidden ?? null,
-      };
-    })()
-  `);
+    // 读新版对话流 DOM（字段驱动渲染 → 气泡 + 候选卡）
+    dom = await win.webContents.executeJavaScript(`
+      (() => {
+        const as = [...document.querySelectorAll('.bubble--assistant')];
+        const last = as[as.length - 1];
+        return {
+          assistantBubbles: as.length,
+          lastPrimary: last ? (last.querySelector('.bubble__text')?.textContent || '').slice(0, 120) : '',
+          lastItems: last ? last.querySelectorAll('.reply-item').length : 0,
+          emptyHidden: document.getElementById('transcriptEmpty')?.hidden ?? null,
+        };
+      })()
+    `);
+  } else {
+    log('smoke.memoryPath.skipped', { reason: 'no LLM_API_KEY' });
+  }
 
   const result = {
     ts: new Date(startTs).toISOString(),
     totalMs: Date.now() - startTs,
     caps: { asr: caps.asr, tts: caps.tts, wake: !!caps.wake },
-    turn1: { skillId: t1.skillId, primary: t1.primary?.text?.slice(0, 160), items: t1.items?.length ?? 0 },
-    turn2: { skillId: t2.skillId, primary: t2.primary?.text?.slice(0, 160), items: t2.items?.length ?? 0 },
-    memoryRecalled,
-    dom,
+    errorPath: { kind: errEvt?.kind, hasErrorBubble },
+    ...(hasValidKey ? {
+      turn1: { skillId: t1.skillId, primary: t1.primary?.text?.slice(0, 160), items: t1.items?.length ?? 0 },
+      turn2: { skillId: t2.skillId, primary: t2.primary?.text?.slice(0, 160), items: t2.items?.length ?? 0 },
+      memoryRecalled,
+      dom,
+    } : { memoryPath: 'skipped (no valid key)' }),
     events,
   };
   const outDir = resolve(ROOT, 'logs', 'smoke');
@@ -127,13 +164,18 @@ async function main() {
   const outFile = resolve(outDir, `electron-${Date.now()}.json`);
   writeFileSync(outFile, JSON.stringify(result, null, 2) + '\n', 'utf8');
 
-  if (!memoryRecalled) throw new Error('多轮记忆未命中：turn2="' + (t2.primary?.text ?? '') + '"（期望含 7/七）');
+  if (hasValidKey && !memoryRecalled) throw new Error('多轮记忆未命中：turn2="' + (t2.primary?.text ?? '') + '"（期望含 7/七）');
 
   log('smoke.electron.pass', { memoryRecalled, outFile });
   console.log('\n[smoke-electron] PASS ✅');
-  console.log('  turn1:', result.turn1.primary);
-  console.log('  turn2:', result.turn2.primary, '| memoryRecalled:', memoryRecalled);
-  console.log('  assistantBubbles:', dom.assistantBubbles, '| emptyHidden:', dom.emptyHidden);
+  console.log('  errorPath:', { kind: errEvt?.kind, hasErrorBubble });
+  if (hasValidKey) {
+    console.log('  turn1:', result.turn1?.primary);
+    console.log('  turn2:', result.turn2?.primary, '| memoryRecalled:', memoryRecalled);
+    console.log('  assistantBubbles:', dom.assistantBubbles, '| emptyHidden:', dom.emptyHidden);
+  } else {
+    console.log('  memoryPath: skipped (no LLM_API_KEY)');
+  }
   console.log('  摘要:', outFile);
   app.quit();
 }

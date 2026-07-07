@@ -1169,6 +1169,355 @@ html, body {
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* ============ Status Dot (connection indicator) ============ */
+/*
+ * Three states: --ok (mint/green), --warn (amber), --unset (rose/grey).
+ * Lives in the topbar, inherits no-drag. Uses box-shadow glow as the
+ * cyber-neon pulse — consistent with the existing glow token system.
+ */
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  transition: box-shadow var(--t-normal), background var(--t-normal);
+  position: relative;
+}
+.status-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.status-dot--ok {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--glow-mint), 0 0 12px var(--glow-mint-soft);
+  animation: dotPulseOk 3s ease-in-out infinite;
+}
+.status-dot--warn {
+  background: var(--accent-amber);
+  box-shadow: 0 0 6px rgba(255, 184, 77, 0.6), 0 0 12px rgba(255, 184, 77, 0.25);
+  animation: dotPulseWarn 2s ease-in-out infinite;
+}
+.status-dot--unset {
+  background: var(--text-muted);
+  box-shadow: 0 0 4px rgba(74, 92, 120, 0.5);
+  animation: none;
+}
+@keyframes dotPulseOk {
+  0%, 100% { box-shadow: 0 0 4px var(--glow-mint-soft); }
+  50%       { box-shadow: 0 0 10px var(--glow-mint), 0 0 18px var(--glow-mint-soft); }
+}
+@keyframes dotPulseWarn {
+  0%, 100% { box-shadow: 0 0 4px rgba(255, 184, 77, 0.3); }
+  50%       { box-shadow: 0 0 10px rgba(255, 184, 77, 0.7), 0 0 18px rgba(255, 184, 77, 0.3); }
+}
+
+/* ============ Settings Panel: group / item extensions ============ */
+/*
+ * New elements from Plan 10: .settings-group, .settings-group__title,
+ * .settings-item (label+input row), .settings-test, .settings-test__result.
+ * Follows the existing .settings-item row pattern already in the file.
+ */
+.settings-group {
+  margin-bottom: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: rgba(19, 29, 43, 0.4);
+}
+.settings-group__title {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+  opacity: 0.75;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* label + input rows inside settings groups */
+.settings-item > span {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  min-width: 72px;
+}
+.settings-item > input[type="password"],
+.settings-item > input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  padding: 5px 8px;
+  outline: none;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.settings-item > input[type="password"]:focus,
+.settings-item > input[type="text"]:focus {
+  border-color: rgba(62, 234, 170, 0.45);
+  box-shadow: 0 0 0 2px var(--glow-mint-faint);
+}
+.settings-item > input[type="password"]::placeholder,
+.settings-item > input[type="text"]::placeholder {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* action row inside a settings-group (test button + result) */
+.settings-item--actions {
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.settings-item--info {
+  opacity: 0.65;
+  padding: 6px 4px;
+}
+.settings-test {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid rgba(62, 234, 170, 0.30);
+  background: var(--glow-mint-faint);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease-spring);
+  -webkit-app-region: no-drag;
+  -webkit-user-select: none;
+  user-select: none;
+  flex-shrink: 0;
+}
+.settings-test:hover {
+  background: rgba(62, 234, 170, 0.14);
+  border-color: rgba(62, 234, 170, 0.55);
+  box-shadow: 0 0 8px var(--glow-mint-soft);
+}
+.settings-test:active { transform: scale(0.96); }
+.settings-test__result {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============ Onboarding overlay ============ */
+/*
+ * Full-screen dim backdrop + centered card. Uses position:absolute so it
+ * overlays .app--sidepanel without escaping the 3-region flex column
+ * (the transcript/dock stay behind the overlay).
+ */
+.onboarding {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 18, 25, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fadeIn var(--t-normal) var(--ease-out) both;
+}
+.onboarding[hidden] { display: none; }
+.onboarding__card {
+  width: calc(100% - 40px);
+  max-width: 340px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid var(--accent);
+  border-radius: var(--r-card);
+  padding: 20px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55), 0 0 40px var(--glow-mint-faint);
+  animation: cardIn var(--t-slow) var(--ease-out) both;
+}
+.onboarding__card h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+.onboarding__card p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+/* reuse settings-item styles for .onboarding label rows */
+.onboarding .settings-item {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px 0;
+}
+.onboarding .settings-item:last-of-type { border-bottom: none; }
+.onboarding__test {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid rgba(62, 234, 170, 0.30);
+  background: var(--glow-mint-faint);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease-spring);
+  -webkit-app-region: no-drag;
+  align-self: flex-start;
+}
+.onboarding__test:hover {
+  background: rgba(62, 234, 170, 0.14);
+  border-color: rgba(62, 234, 170, 0.55);
+  box-shadow: 0 0 10px var(--glow-mint-soft);
+}
+.onboarding__test:active { transform: scale(0.96); }
+.onboarding__result {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  min-height: 16px;
+}
+.onboarding__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+.onboarding__skip {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--t-fast);
+  -webkit-app-region: no-drag;
+}
+.onboarding__skip:hover { color: var(--text-secondary); border-color: var(--border-bright); }
+.onboarding__done {
+  height: 30px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: linear-gradient(135deg, var(--accent) 0%, #2AC5A0 100%);
+  color: var(--bg-deep);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease-spring);
+  box-shadow: 0 2px 10px var(--glow-mint-soft);
+  -webkit-app-region: no-drag;
+}
+.onboarding__done:hover { box-shadow: 0 4px 16px var(--glow-mint); transform: translateY(-1px); }
+.onboarding__done:disabled {
+  opacity: 0.38;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ============ Error Bubble ============ */
+/*
+ * .bubble--error: visually distinct from .bubble--assistant (mint edge) —
+ * uses amber/rose warning tint. Left-border is accent-amber, background
+ * has a faint rose wash. Includes .bubble__actions (one-row action buttons).
+ */
+.bubble--error {
+  align-self: flex-start;
+  max-width: 92%;
+  background: rgba(28, 18, 18, 0.80);
+  border: 1px solid rgba(255, 184, 77, 0.22);
+  border-left: 2px solid var(--accent-amber);
+  border-radius: 4px 16px 16px 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: -2px 0 12px rgba(255, 184, 77, 0.10), 0 2px 16px rgba(0,0,0,0.25);
+  animation: bubbleIn var(--t-normal) var(--ease-out) both;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.bubble--error .bubble__text {
+  color: rgba(232, 236, 244, 0.9);
+}
+.bubble__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.bubble__fix,
+.bubble__retry {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease-spring);
+  -webkit-app-region: no-drag;
+  -webkit-user-select: none;
+  user-select: none;
+  flex-shrink: 0;
+}
+.bubble__fix {
+  border: 1px solid rgba(255, 184, 77, 0.40);
+  background: rgba(255, 184, 77, 0.10);
+  color: var(--accent-amber);
+}
+.bubble__fix:hover {
+  border-color: rgba(255, 184, 77, 0.70);
+  background: rgba(255, 184, 77, 0.18);
+  box-shadow: 0 0 8px rgba(255, 184, 77, 0.25);
+}
+.bubble__retry {
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+}
+.bubble__retry:hover {
+  border-color: var(--border-bright);
+  color: var(--text-secondary);
+  background: var(--glass);
+}
+.bubble__fix:active,
+.bubble__retry:active { transform: scale(0.95); }
+
 /* ============ Reduced Motion ============ */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1180,4 +1529,7 @@ html, body {
   .bg__orb { animation: none !important; }
   .avatar__halo { animation: none !important; }
   .wave span { animation: none !important; height: 8px !important; }
+  /* Status dot: no pulse in reduced-motion */
+  .status-dot--ok,
+  .status-dot--warn { animation: none !important; }
 }
