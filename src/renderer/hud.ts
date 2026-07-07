@@ -10,7 +10,7 @@ import { initWakeWord } from './wakeword.js';
 import { encodeWav } from './wav.js';
 import { buildRenderPlan } from '../shared/render-plan.js';
 import { REPLY_STYLES, DEFAULT_STYLE, type ReplyStyle } from '../shared/ipc.js';
-import type { Capabilities, UniversalOutput, WakeRuntime, ClassifiedErrorDTO, HealthResultDTO, ZuitiConfigDTO } from '../shared/ipc.js';
+import type { Capabilities, UniversalOutput, WakeRuntime, ClassifiedErrorDTO, HealthResultDTO, ZuitiConfigDTO, DiagStatsDTO } from '../shared/ipc.js';
 import { nextConvState, type ConvState, type ConvEvent } from '../shared/conv-state.js';
 
 declare global {
@@ -39,6 +39,10 @@ declare global {
       onConnectionStatus(cb: (health: HealthResultDTO[]) => void): void;
       getHistory(limit?: number): Promise<unknown[]>;
       clearHistory(): Promise<void>;
+      getDiag(): Promise<DiagStatsDTO>;
+      openLogs(): void;
+      exportDiag(): Promise<string>;
+      onCrashNotice(cb: (info: { message: string }) => void): void;
     };
   }
 }
@@ -722,13 +726,14 @@ const $settingsBtn = $('settingsBtn') as HTMLButtonElement;
 const $settingsPanel = $('settingsPanel') as HTMLElement;
 const $settingsClose = $('settingsClose') as HTMLButtonElement;
 
-$('connDot')?.addEventListener('click', () => { $settingsPanel.hidden = false; void loadSettingsUI(); });
+$('connDot')?.addEventListener('click', () => { $settingsPanel.hidden = false; void loadSettingsUI(); void loadDiag(); });
 const $settingDefaultStyle = $('settingDefaultStyle') as HTMLSelectElement;
 const $settingTts = $('settingTts') as HTMLInputElement;
 const $settingWakeThreshold = $('settingWakeThreshold') as HTMLInputElement;
 
 $settingsBtn?.addEventListener('click', () => {
   void loadSettingsUI();
+  void loadDiag();
   $settingsPanel.hidden = false;
 });
 
@@ -790,6 +795,29 @@ $settingTts?.addEventListener('change', () => {
 $settingWakeThreshold?.addEventListener('input', () => {
   void api.setConfig({ advanced: { wakeThreshold: Number($settingWakeThreshold.value) / 100 } });
 });
+
+async function loadDiag(): Promise<void> {
+  try {
+    const s = await api.getDiag();
+    const skills = Object.entries(s.skillCounts).map(([k, v]) => `${k}:${v}`).join(' ') || '—';
+    ($('diagStats') as HTMLElement).textContent =
+      `最近 ${s.total} 轮 · 延迟 p50 ${s.latencyP50}ms / 均 ${s.latencyAvg}ms · 错误 ${s.errorCount} · ${skills}`;
+  } catch { ($('diagStats') as HTMLElement).textContent = '诊断读取失败'; }
+}
+
+$('openLogs')?.addEventListener('click', () => api.openLogs());
+$('exportDiag')?.addEventListener('click', async () => {
+  const el = $('exportResult') as HTMLElement; el.textContent = '导出中…';
+  try { const p = await api.exportDiag(); el.textContent = '已导出：' + p.split('/').pop(); }
+  catch { el.textContent = '导出失败'; }
+});
+
+api.onCrashNotice((info) => {
+  const bar = $('crashNotice') as HTMLElement;
+  ($('crashNoticeText') as HTMLElement).textContent = info.message;
+  bar.hidden = false;
+});
+$('crashNoticeClose')?.addEventListener('click', () => { ($('crashNotice') as HTMLElement).hidden = true; });
 
 // 测试连接
 $('testLlm')?.addEventListener('click', async () => {

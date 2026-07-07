@@ -132,6 +132,15 @@
             <input type="range" class="settings-item__range" id="settingWakeThreshold" min="0" max="100" value="50" />
           </div>
         </div>
+        <!-- 诊断 -->
+        <div class="settings-group"><div class="settings-group__title">诊断</div>
+          <div class="diag-stats" id="diagStats">—</div>
+          <div class="settings-item settings-item--actions">
+            <button class="settings-test" id="openLogs" type="button">打开日志目录</button>
+            <button class="settings-test" id="exportDiag" type="button">导出诊断包</button>
+            <span class="settings-test__result" id="exportResult"></span>
+          </div>
+        </div>
         <!-- 版本 -->
         <div class="settings-item settings-item--info">
           <span class="settings-item__label">版本</span>
@@ -159,6 +168,12 @@
         </section>
       </div>
     </aside>
+
+    <!-- 崩溃提示条 -->
+    <div class="notice notice--crash" id="crashNotice" hidden>
+      <span class="notice__text" id="crashNoticeText"></span>
+      <button class="notice__close" id="crashNoticeClose" type="button">×</button>
+    </div>
 
     <!-- 对话流 -->
     <main class="transcript" id="transcript">
