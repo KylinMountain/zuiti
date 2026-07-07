@@ -650,6 +650,7 @@ async function loadSettingsUI(): Promise<void> {
     ($('cfgTtsModel') as HTMLInputElement).value = c.tts.model ?? '';
     ($('cfgTtsVoice') as HTMLInputElement).value = c.tts.voice ?? '';
     $settingDefaultStyle.value = c.ui.defaultStyle ?? 'empathy';
+    if (!$settingDefaultStyle.value) $settingDefaultStyle.value = 'empathy';
     setCurrentStyle((c.ui.defaultStyle as ReplyStyle) ?? DEFAULT_STYLE);
     $settingTts.checked = c.ui.ttsEnabled ?? true;
     if (typeof c.advanced.wakeThreshold === 'number') {
@@ -684,6 +685,7 @@ $('cfgTtsVoice')?.addEventListener('change', (e) => {
 
 // 偏好
 $settingDefaultStyle?.addEventListener('change', () => {
+  setCurrentStyle($settingDefaultStyle.value as ReplyStyle);
   void api.setConfig({ ui: { defaultStyle: $settingDefaultStyle.value } });
 });
 $settingTts?.addEventListener('change', () => {
@@ -700,6 +702,7 @@ $('testLlm')?.addEventListener('click', async () => {
   try {
     const results = await api.testConnection('llm');
     const r = results[0];
+    if (!r) { el.textContent = '❌ 无响应'; return; }
     el.textContent = r.ok ? '✅ 连接正常' : '❌ ' + r.message;
   } catch (err) {
     el.textContent = '❌ ' + (err instanceof Error ? err.message : String(err));
