@@ -73,6 +73,14 @@ export const CHANNELS = {
   configTest: 'config:test',
   /** 主 → 渲染：连接状态变化推送（HealthResult[]）。 */
   configStatus: 'config:status',
+  /** 渲染 → 主：取诊断聚合统计。 */
+  diagGet: 'diag:get',
+  /** 渲染 → 主：打开日志目录。 */
+  diagOpenLogs: 'diag:openLogs',
+  /** 渲染 → 主：导出脱敏诊断包，返回文件路径。 */
+  diagExport: 'diag:export',
+  /** 主 → 渲染：崩溃提示（不静默死）。 */
+  crashNotice: 'crash:notice',
 } as const;
 
 /** 唤醒词运行所需：openWakeWord 三个模型（base64）+ 阈值，由主进程下发给渲染。 */
@@ -136,4 +144,13 @@ export interface ZuitiConfigDTO {
   llm: { model?: string }; asr: { model?: string; lang?: 'zh' | 'auto' | 'en' };
   tts: { model?: string; voice?: string }; advanced: { wakeThreshold?: number };
   ui: { defaultStyle?: string; ttsEnabled?: boolean };
+}
+
+/** 诊断聚合统计 DTO（对应 core/diagnostics.ts 的 RunStat）。 */
+export interface DiagStatsDTO {
+  total: number;
+  latencyP50: number;
+  latencyAvg: number;
+  errorCount: number;
+  skillCounts: Record<string, number>;
 }

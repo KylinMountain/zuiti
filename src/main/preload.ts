@@ -4,7 +4,7 @@
  * 渲染层只能通过 window.zuiti 调用，无法直接访问 Node / Electron。
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import { CHANNELS, type Capabilities, type UniversalOutput, type ReplyStyle, type ClassifiedErrorDTO, type HealthResultDTO, type ZuitiConfigDTO } from '../shared/ipc.js';
+import { CHANNELS, type Capabilities, type UniversalOutput, type ReplyStyle, type ClassifiedErrorDTO, type HealthResultDTO, type ZuitiConfigDTO, type DiagStatsDTO } from '../shared/ipc.js';
 
 const api = {
   /** 渲染层日志转发到主进程（写入同一个日志文件）。 */
@@ -89,6 +89,16 @@ const api = {
   testConnection: (service: 'llm' | 'asr' | 'tts' | 'all'): Promise<HealthResultDTO[]> => ipcRenderer.invoke(CHANNELS.configTest, service),
   /** 监听连接状态变化推送（HealthResult[]）。 */
   onConnectionStatus: (cb: (health: HealthResultDTO[]) => void): void => { ipcRenderer.on(CHANNELS.configStatus, (_e, h: HealthResultDTO[]) => cb(h)); },
+  /** 获取诊断聚合统计。 */
+  getDiag: (): Promise<DiagStatsDTO> => ipcRenderer.invoke(CHANNELS.diagGet),
+  /** 打开日志目录。 */
+  openLogs: (): void => { ipcRenderer.send(CHANNELS.diagOpenLogs); },
+  /** 导出脱敏诊断包，返回文件路径。 */
+  exportDiag: (): Promise<string> => ipcRenderer.invoke(CHANNELS.diagExport),
+  /** 监听崩溃提示。 */
+  onCrashNotice: (cb: (info: { message: string }) => void): void => {
+    ipcRenderer.on(CHANNELS.crashNotice, (_e, info: { message: string }) => cb(info));
+  },
 };
 
 contextBridge.exposeInMainWorld('zuiti', api);
