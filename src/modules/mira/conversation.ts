@@ -148,6 +148,11 @@ export class MiraConversation {
         : stylePrefix + text;
       await session.sendUserMessage(content);
     } catch (err) {
+      if (providerError) {
+        const httpStatus = extractHttpStatus(providerError);
+        log.warn('conversation.provider-error', { runId, httpStatus, detail: String(providerError).slice(0, 200) });
+        throw classifyError({ httpStatus, cause: providerError });
+      }
       log.error('conversation.turn.error', {
         runId, msg: err instanceof Error ? err.message : String(err),
         stack: err instanceof Error ? err.stack : undefined, latencyMs: Date.now() - startTs,
