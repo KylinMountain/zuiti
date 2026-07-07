@@ -432,6 +432,7 @@ html, body {
   padding: 10px 4px;
   border-bottom: 1px solid var(--border-subtle);
   gap: 12px;
+  min-width: 0;
 }
 .settings-item:last-child { border-bottom: none; }
 .settings-item__label {

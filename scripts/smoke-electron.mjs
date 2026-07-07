@@ -71,26 +71,42 @@ async function main() {
   const caps = await win.webContents.executeJavaScript('window.zuiti.capabilities()');
   log('smoke.caps', { asr: caps.asr, tts: caps.tts, wake: !!caps.wake });
 
-  // ── 错误呈现路径冒烟 ──────────────────────────────────────────────
-  // 注入故意错误的凭证，发一轮 → 断言收到 onError(authInvalid) + DOM 出现 .bubble--error
-  log('smoke.errorPath.start');
+  // 注册单一 onError 监听器（错误路径和记忆路径共用同一个）
   await win.webContents.executeJavaScript(`
-    window.__smokeErr = { error: null };
-    window.zuiti.onError((e) => { window.__smokeErr.error = e; });
-    window.zuiti.setConfig({ credential: { apiKey: 'bad', baseURL: 'https://x/v1' } });
+    window.__smokeErr = { last: null };
+    window.zuiti.onError((e) => { window.__smokeErr.last = e; });
     true;
   `);
-  await win.webContents.executeJavaScript(`window.zuiti.runCoach('test', false); true;`);
-  await waitFor(win, '!!window.__smokeErr.error', 20000, 'onError(authInvalid or network)');
-  const errEvt = await win.webContents.executeJavaScript('window.__smokeErr.error');
-  log('smoke.errorPath.onError', { kind: errEvt?.kind, msg: errEvt?.userMessage });
-  // DOM: .bubble--error 应已渲染
-  const hasErrorBubble = await win.webContents.executeJavaScript(
-    `document.querySelectorAll('.bubble--error').length > 0`
-  );
-  log('smoke.errorPath.dom', { hasErrorBubble });
-  if (!hasErrorBubble) throw new Error('smoke: .bubble--error not found in DOM after error');
-  log('smoke.errorPath.pass', { kind: errEvt?.kind });
+
+  // ── 错误呈现路径冒烟 ──────────────────────────────────────────────
+  // 注入故意错误的凭证（真实 baseURL + 故意无效 key → 真实端点返回 401 → authInvalid）
+  // 仅在 LLM_BASE_URL 可用时运行；否则跳过（不硬失败）
+  let errEvt = null;
+  let hasErrorBubble = false;
+  if (!process.env.LLM_BASE_URL) {
+    log('smoke.errorPath.skipped', { reason: 'no LLM_BASE_URL' });
+  } else {
+    log('smoke.errorPath.start');
+    await win.webContents.executeJavaScript(
+      `window.zuiti.setConfig({ credential: { apiKey: 'sk-deliberately-invalid-key', baseURL: ${JSON.stringify(process.env.LLM_BASE_URL)} } }); true;`
+    );
+    await win.webContents.executeJavaScript(`window.zuiti.runCoach('test', false); true;`);
+    await waitFor(win, '!!window.__smokeErr.last', 20000, 'onError(authInvalid)');
+    errEvt = await win.webContents.executeJavaScript('window.__smokeErr.last');
+    log('smoke.errorPath.onError', { kind: errEvt?.kind, msg: errEvt?.userMessage });
+    // 硬断言 1: kind 必须是 authInvalid
+    const errKind = await win.webContents.executeJavaScript('window.__smokeErr.last && window.__smokeErr.last.kind');
+    if (errKind !== 'authInvalid') {
+      throw new Error(`smoke: expected authInvalid but got kind="${errKind}" (check real endpoint returns 401 for bad key)`);
+    }
+    // 硬断言 2: DOM 中必须出现 .bubble--error
+    hasErrorBubble = await win.webContents.executeJavaScript(
+      `document.querySelectorAll('.bubble--error').length > 0`
+    );
+    log('smoke.errorPath.dom', { hasErrorBubble });
+    if (!hasErrorBubble) throw new Error('smoke: .bubble--error not found in DOM after error');
+    log('smoke.errorPath.pass', { kind: errKind });
+  }
 
   // 恢复可用凭证（若有效 key 可用则继续两轮记忆测试）
   const hasValidKey = !!process.env.LLM_API_KEY;
@@ -99,22 +115,23 @@ async function main() {
     true;
   `);
 
-  // 挂结果钩子（累积每轮 result / chunks / error）
+  // 挂结果钩子（累积每轮 result / chunks）— onError 已在上方注册，不重复注册
   await win.webContents.executeJavaScript(`
     window.__smoke = { results: [], chunks: 0, error: null };
     window.zuiti.onReplyChunk(() => window.__smoke.chunks++);
     window.zuiti.onResult((dto) => window.__smoke.results.push(dto));
-    window.zuiti.onError((m) => window.__smoke.error = m);
     true;
   `);
 
   async function runTurn(text, idx) {
     const t0 = Date.now();
     // 走 preload runCoach（确定性、可控是否截屏）；主进程用同一个保活会话 → 跨轮记忆。
+    // 清除上一轮可能残留的错误，再发新请求
+    await win.webContents.executeJavaScript(`window.__smokeErr.last = null; true;`);
     await win.webContents.executeJavaScript(`window.zuiti.runCoach(${JSON.stringify(text)}, ${WITH_SCREENSHOT}); true;`);
-    await waitFor(win, `window.__smoke.results.length >= ${idx} || !!window.__smoke.error`, 60000, 'result ' + idx);
-    const err = await win.webContents.executeJavaScript('window.__smoke.error');
-    if (err) throw new Error('coach error: ' + err);
+    await waitFor(win, `window.__smoke.results.length >= ${idx} || !!window.__smokeErr.last`, 60000, 'result ' + idx);
+    const err = await win.webContents.executeJavaScript('window.__smokeErr.last');
+    if (err) throw new Error('coach error: ' + JSON.stringify(err));
     const dto = await win.webContents.executeJavaScript(`window.__smoke.results[${idx - 1}]`);
     log('smoke.turn', { idx, ms: Date.now() - t0, skillId: dto.skillId, primaryLen: dto.primary?.text?.length ?? 0, items: dto.items?.length ?? 0 });
     return dto;
