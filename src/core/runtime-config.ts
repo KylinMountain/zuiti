@@ -22,6 +22,13 @@ export function initRuntimeConfig(fileConfig: ZuitiConfig, envVars: Record<strin
   ready = true;
 }
 
+/** 测试用：清空模块级缓存，回到未初始化态。 */
+export function resetRuntimeConfig(): void {
+  file = EMPTY_CONFIG;
+  env = {};
+  ready = false;
+}
+
 function ensure(): void {
   if (!ready) initRuntimeConfig(EMPTY_CONFIG, process.env);
 }
