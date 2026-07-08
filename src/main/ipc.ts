@@ -252,6 +252,13 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
   ipcMain.handle(CHANNELS.configSet, (_e, patch: Parameters<typeof saveConfig>[1]) => {
     const merged = saveConfig(userDataDir, patch);
     initRuntimeConfig(merged, process.env);
+    if (patch.credential) {
+      // 凭证已变但保活 session 的 pi model registry 在创建时就绑死了旧凭证——
+      // 不结束旧会话的话，「去设置改好 key」不会让当前对话真正用上新 key，
+      // 必须等用户另外点「新对话」。这里主动结束，下一轮自然用新凭证建新 session。
+      endConversation();
+      log.info('config.credentialChanged.endConversation');
+    }
     log.info('config.saved', { sections: Object.keys(patch) });
     return getEffectiveConfig();
   });

@@ -87,8 +87,10 @@ async function main() {
     log('smoke.errorPath.skipped', { reason: 'no LLM_BASE_URL' });
   } else {
     log('smoke.errorPath.start');
+    // 注意：不加 "; true;" —— executeJavaScript 会 await 脚本返回的 Promise 本身作为完成值；
+    // 加了 "; true;" 会让完成值变成同步的 true，导致这一步在 setConfig 的 IPC 往返真正落盘前就 resolve。
     await win.webContents.executeJavaScript(
-      `window.zuiti.setConfig({ credential: { apiKey: 'sk-deliberately-invalid-key', baseURL: ${JSON.stringify(process.env.LLM_BASE_URL)} } }); true;`
+      `window.zuiti.setConfig({ credential: { apiKey: 'sk-deliberately-invalid-key', baseURL: ${JSON.stringify(process.env.LLM_BASE_URL)} } })`
     );
     await win.webContents.executeJavaScript(`window.zuiti.runCoach('test', false); true;`);
     await waitFor(win, '!!window.__smokeErr.last', 20000, 'onError(authInvalid)');
@@ -109,10 +111,10 @@ async function main() {
   }
 
   // 恢复可用凭证（若有效 key 可用则继续两轮记忆测试）
+  // 同上：不加 "; true;"，让 setConfig 的 Promise 成为完成值，确保配置真正落盘后才继续。
   const hasValidKey = !!process.env.LLM_API_KEY;
   await win.webContents.executeJavaScript(`
-    window.zuiti.setConfig({ credential: { apiKey: ${JSON.stringify(process.env.LLM_API_KEY ?? '')}, baseURL: ${JSON.stringify(process.env.LLM_BASE_URL ?? '')} } });
-    true;
+    window.zuiti.setConfig({ credential: { apiKey: ${JSON.stringify(process.env.LLM_API_KEY ?? '')}, baseURL: ${JSON.stringify(process.env.LLM_BASE_URL ?? '')} } })
   `);
 
   // 挂结果钩子（累积每轮 result / chunks）— onError 已在上方注册，不重复注册
