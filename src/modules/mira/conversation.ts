@@ -42,6 +42,11 @@ function stripToolInvocation(raw: string): string {
 function safeJson(e: unknown): string {
   try { return JSON.stringify(e) ?? ''; } catch { return ''; }
 }
+/** 从 pi 事件 JSON 里探测 agent read 了哪个 skill（任意 skill 目录名，不限硬编码列表）。 */
+export function detectSkillId(eventJson: string): string | undefined {
+  const m = eventJson.match(/skills\/([a-zA-Z0-9_-]+)\/SKILL\.md/);
+  return m?.[1];
+}
 function dataUrlToImage(dataUrl: string): { type: 'image'; data: string; mimeType: string } {
   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!m) throw new Error('非法 image data URL');
@@ -103,9 +108,9 @@ export class MiraConversation {
 
     const unsub = session.subscribe((e) => {
       const j = safeJson(e);
-      const sm = j.match(/skills\/(reply|explain|summarize)\/SKILL\.md/);
-      if (sm && !skillRead) {
-        skillRead = sm[1];
+      const detected = detectSkillId(j);
+      if (detected && !skillRead) {
+        skillRead = detected;
         log.info('skill.selected', { runId, skillId: skillRead, latencyMs: Date.now() - startTs });
       }
       // Capture pi provider errors: e.message.stopReason === 'error' (e.g. 401 Invalid API Key)

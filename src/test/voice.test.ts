@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { audioToDataUrl, buildAsrBody, buildTtsBody, parseDataUrl, mimeToAudioMime } from '../core/voice.js';
+import { audioToDataUrl, apiUrl, buildAsrBody, buildTtsBody, parseDataUrl, mimeToAudioMime, transcribeAudio } from '../core/voice.js';
+import { initRuntimeConfig } from '../core/runtime-config.js';
+import { EMPTY_CONFIG } from '../core/config-store.js';
 
 test('audioToDataUrl: wav bytes → data URL', () => {
   const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46]); // "RIFF"
@@ -84,4 +86,26 @@ test('buildTtsBody: 自定义 voice 透传', () => {
     audio: { voice: string };
   };
   assert.equal(body.audio.voice, 'Chloe');
+});
+
+test('apiUrl: 去掉 baseURL 尾部斜杠，不产生双斜杠', () => {
+  assert.equal(apiUrl('https://x/v1'), 'https://x/v1/chat/completions');
+  assert.equal(apiUrl('https://x/v1/'), 'https://x/v1/chat/completions');
+  assert.equal(apiUrl('https://x/v1//'), 'https://x/v1/chat/completions');
+});
+
+test('transcribeAudio: baseURL 带尾部斜杠时，实际请求 URL 无双斜杠', async () => {
+  initRuntimeConfig({ ...EMPTY_CONFIG, credential: { apiKey: 'k', baseURL: 'https://x/v1/' } }, {});
+  const realFetch = globalThis.fetch;
+  let calledUrl = '';
+  globalThis.fetch = (async (url: unknown) => {
+    calledUrl = String(url);
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await transcribeAudio(new Uint8Array([1, 2, 3]), 'audio/wav', 'zh');
+    assert.equal(calledUrl, 'https://x/v1/chat/completions');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

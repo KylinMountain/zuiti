@@ -1,6 +1,7 @@
 /** 服务连接自检：各发一个最小请求，归一成 HealthResult。供首次向导 / 设置「测试」/ 状态点用。 */
 import { getCredential, getLlmModel, getAsr, getTts } from './runtime-config.js';
 import { classifyError, type ErrorKind } from './errors.js';
+import { apiUrl } from './voice.js';
 import { log } from './log.js';
 
 export interface HealthResult {
@@ -22,7 +23,7 @@ async function probe(service: 'llm' | 'asr' | 'tts', body: unknown): Promise<Hea
     return { service, ok: false, message: '未配置 API Key / Base URL', latencyMs: 0 };
   }
   try {
-    const resp = await fetch(`${baseURL}/chat/completions`, {
+    const resp = await fetch(apiUrl(baseURL), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),

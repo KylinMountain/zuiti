@@ -34,3 +34,10 @@ test('fetch 抛（网络）→ ok:false，kind=network', async () => {
   assert.equal(r.ok, false);
   assert.equal(r.kind, 'network');
 });
+test('baseURL 带尾部斜杠时，实际请求 URL 无双斜杠', async () => {
+  initRuntimeConfig({ ...EMPTY_CONFIG, credential: { apiKey: 'k', baseURL: 'https://x/v1/' } }, {});
+  let calledUrl = '';
+  globalThis.fetch = (async (url: unknown) => { calledUrl = String(url); return new Response('{}', { status: 200 }); }) as typeof fetch;
+  await checkLlm();
+  assert.equal(calledUrl, 'https://x/v1/chat/completions');
+});

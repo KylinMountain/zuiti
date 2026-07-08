@@ -18,6 +18,11 @@ export type AsrLanguage = 'auto' | 'zh' | 'en';
 /** 音频 MIME 类型。 */
 export type AudioMime = 'audio/wav' | 'audio/mpeg' | 'audio/mp3';
 
+/** 拼接 chat/completions 端点 URL：去掉 baseURL 尾部斜杠，避免 `.../v1//chat/completions` 双斜杠。 */
+export function apiUrl(baseURL: string): string {
+  return `${baseURL.replace(/\/+$/, '')}/chat/completions`;
+}
+
 /** 把音频 bytes 编码成 MiMo ASR 要的 data URL。 */
 export function audioToDataUrl(bytes: Uint8Array, mime: AudioMime): string {
   const base64 = Buffer.from(bytes).toString('base64');
@@ -84,7 +89,7 @@ export async function transcribeAudio(
   const body = buildAsrBody(dataUrl, asr.model, language ?? asr.lang);
   log.info('asr.request', { bytes: bytes.length, language: language ?? asr.lang });
 
-  const resp = await fetch(`${baseURL}/chat/completions`, {
+  const resp = await fetch(apiUrl(baseURL), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),
@@ -116,7 +121,7 @@ export async function* synthesizeSpeechStream(
   const body = buildTtsBody(text, tts.model, style, tts.voice);
   log.info('tts.request', { textLen: text.length, style: style ?? '' });
 
-  const resp = await fetch(`${baseURL}/chat/completions`, {
+  const resp = await fetch(apiUrl(baseURL), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),
