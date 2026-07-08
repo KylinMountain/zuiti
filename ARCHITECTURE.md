@@ -51,7 +51,7 @@ Types → Config → Core → Modules → Main(Runtime) → Renderer(UI)
   createMiraSession（一次请求一个 session、一个 agent loop）
    ├─ 关 thinking 的 MiMo model（core/mira-model.ts）
    ├─ MIRA_SYSTEM_PROMPT（嘴替人格，经 DefaultResourceLoader 注入）
-   ├─ skills/ 下三个 SKILL.md 的 name+description 注入 system prompt（渐进式披露）
+   ├─ skills/ 下每个 SKILL.md 的 name+description 注入 system prompt（渐进式披露）
    ├─ tools:['read','emit_result']（read 用来加载 SKILL.md，emit_result 产结构化）
    └─ 截图作为 image content block 只喂这一个 session 一次
         │
@@ -177,7 +177,12 @@ src/
 skills/                    # Agent Skills（渐进式披露，每个一个 SKILL.md）
 ├── reply/SKILL.md         # 替用户把话说漂亮（恋爱/对线/职场/英文）
 ├── explain/SKILL.md       # 看屏讲解英文/难懂内容
-└── summarize/SKILL.md     # 群聊/邮件/长讨论总结要点
+├── summarize/SKILL.md     # 群聊/邮件/长讨论总结要点
+├── xiaohongshu/SKILL.md   # 小红书风格文案（种草/避雷/干货角度可选）
+├── dun/SKILL.md           # 得体催款/催回复话术
+├── email/SKILL.md         # 回复难回的邮件（中/英）
+├── decode/SKILL.md        # 看屏解读阴阳怪气/潜台词
+└── debate/SKILL.md        # 理性对线（守红线：无人身攻击/侮辱/群体贬损/网暴）
 scripts/
 ├── fetch-wake-models.mjs  # 下载 openWakeWord 3 个 ONNX 到 models/
 ├── copy-assets.mjs        # 拷 html/css + onnx wasm 到 dist/renderer/

@@ -37,7 +37,7 @@
 | ⚙️ | **应用内配置 + 首次向导** | 首次启动弹向导填 API Key，之后可在设置面板随时更改凭证 / 模型 / 偏好，立即生效，无需重启 |
 | 🔴 | **错误可见** | 网络失败 / Key 无效等错误以带「去设置 / 重试」按钮的错误气泡呈现，连接状态点三色可视 |
 | 🛡️ | **崩溃兜底 + 本地诊断** | 主进程未捕获异常自动写崩溃报告并重载渲染层；设置「诊断」面板可查近期运行统计、一键导出脱敏诊断包（apiKey 自动替换为 `***`）——**全本地，无数据上云** |
-| 🧩 | **Skill 扩展底座** | 今天替你撩 / 怂 / 跟老板说话；明天能写小红书文案、跟客服 battle、解读阴阳怪气 |
+| 🧩 | **Skill 扩展底座** | 今天替你撩 / 怂 / 跟老板说话；现已扩展到小红书文案 / 催款催回复 / 回邮件（中英）/ 解读阴阳怪气 / 理性对线（守红线不网暴），共 8 个内置 skill，持续新增中 |
 
 ## 三步救场
 
@@ -157,7 +157,7 @@ src/
 ├── renderer/          # HUD 满高侧栏 + 本地 openWakeWord 唤醒（esbuild 打包，字段驱动渲染，对话流 UI）
 ├── shared/            # IPC 契约（ipc.ts）+ 连续对话状态机（conv-state.ts）
 └── test/              # node:test（含 architecture.test.ts 架构 lint）
-skills/                # Agent Skills：reply / explain / summarize（每个一个 SKILL.md，渐进式披露）
+skills/                # Agent Skills：reply / explain / summarize / xiaohongshu / dun / email / decode / debate（每个一个 SKILL.md，渐进式披露）
 ```
 
 关键不变量（机械强制）：
@@ -171,7 +171,7 @@ skills/                # Agent Skills：reply / explain / summarize（每个一�
 
 底座是一个"看屏 + 语音 + 技能"的通用引擎，能不断长出新场景——一个停不下来的赛博嘴替。
 
-`✍️ 替你写小红书文案` · `🥊 替你跟客服 battle` · `🔍 替你解读阴阳怪气` · `💸 替你催甲方打款` · `📧 替你回不想回的邮件` · `🌍 替你跟老外唠`
+`🥊 替你跟客服 battle` · `🌍 替你跟老外唠`
 
 ## 文档
 
