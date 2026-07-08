@@ -134,14 +134,18 @@ npm start
 ## 开发
 
 ```bash
-npm run typecheck   # 双 tsconfig 类型检查（主进程 + 渲染层；渲染层类型错误只有这里抓得到）
-npm test            # 编译（tsconfig.json，不含 renderer）+ node:test（含架构 lint）
-npm run test:e2e    # 真 MiMo e2e（需 .env 的 LLM key，CI 跳过）
-npm run build       # 编译主进程 + esbuild 打包渲染层
-npm run dev         # build + electron（带日志）
+npm run typecheck     # 双 tsconfig 类型检查（主进程 + 渲染层；渲染层类型错误只有这里抓得到）
+npm test              # 编译（tsconfig.json，不含 renderer）+ node:test（含架构 lint）
+npm run test:e2e      # 真 MiMo e2e（需 .env 的 LLM key，CI 默认跳过）
+npm run smoke:main    # 真 API 冒烟：core 层直连 LLM/ASR/TTS，不起 Electron
+npm run smoke:electron # 真 API 冒烟：起 Electron + 真 IPC，覆盖多轮对话/错误分类/凭证热切换
+npm run build         # 编译主进程 + esbuild 打包渲染层
+npm run dev           # build + electron（带日志）
 ```
 
-CI：push / PR 到 main 时自动跑 typecheck + test（`.github/workflows/ci.yml`）。
+`npm test` 的 glob 只匹配 `dist/test/*.test.js`，**不会递归进 `dist/test/e2e/`**——e2e 测试只能靠 `npm run test:e2e` 触发，默认整体跳过（`E2E_SKIP`/`SHOULD_RUN_E2E` 控制），因为要花真 token 打真 MiMo key。三层测试各管一段：`npm test` 管纯函数/架构不变量（快、免费、每次提交跑）；`npm run test:e2e` 管 skill 路由和输出形状（真 key，按需跑）；`npm run smoke:electron` 管真实用户路径——多轮记忆、TTS 首句先播、错误分类到 UI、Settings 改凭证后立即生效（真 key + 真 Electron，人工触发，不进 CI）。
+
+CI：push / PR 到 main 时自动跑 typecheck + test（`.github/workflows/ci.yml`）。e2e 和两个 smoke 脚本都要花真 API 调用，CI 不跑，需要手动执行。
 
 ## 架构
 

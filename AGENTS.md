@@ -57,5 +57,16 @@ TypeScript (ESM) · Node ≥ 22 · Electron 42 · `@earendil-works/pi-coding-age
 
 ## Provider 配置
 
-LLM 走小米 MiMo（OpenAI 兼容），经 pi 的 `ModelRegistry.inMemory(authStorage).registerProvider('mimo', …)` 注册（**关 thinking**，见 `src/core/mira-model.ts`）。key 在 `.env`：`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`（=mimo-v2.5-pro）。
-`ASR_API_KEY` / `TTS_API_KEY` 供语音 harness（ASR/TTS，`src/core/voice.ts`）。详见 [src/core/provider.ts](./src/core/provider.ts) 与 [.env.example](./.env.example)。
+LLM 走小米 MiMo（OpenAI 兼容），经 pi 的 `ModelRegistry.inMemory(authStorage).registerProvider('mimo', …)` 注册（**关 thinking**，见 `src/core/mira-model.ts`）。
+
+**Plan 10 后，应用内 Settings 是配置凭证的主路径**：首次未配置自动弹向导，之后随时在设置面板改 LLM/ASR/TTS 的 key + endpoint，明文 JSON 存 `userData`（`src/core/config-store.ts`）；userData 有配置时优先于 `.env`。`.env` 仍是开发期默认值：`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`（=mimo-v2.5-pro）、`ASR_API_KEY` / `TTS_API_KEY`。详见 [src/core/provider.ts](./src/core/provider.ts)、[src/core/runtime-config.ts](./src/core/runtime-config.ts) 与 [.env.example](./.env.example)。
+
+> **改凭证会结束当前保活会话**（`main/ipc.ts` 的 `config:set` 处理器）：pi 的 model registry 在 session 创建时就绑死了 key，不结束旧 session 换 key 不会生效——排查"Settings 改了 key 还是 401"先看这条。
+
+## 测试策略
+
+命令列表见 [README.md「开发」](./README.md#开发)。三层，由快到慢：`npm test`（纯函数 + 架构不变量，免费，每次提交跑）→ `npm run test:e2e`（真 key，验证 skill 路由/输出形状，按需跑）→ `npm run smoke:electron`（真 key + 真 Electron + 真 IPC，端到端用户路径，人工触发，不进 CI）。
+
+**排坑记录（下次遇到类似症状先查这里）：**
+- **baseURL 尾部斜杠拼出双斜杠**：naive `${baseURL}/chat/completions` 拼接，`baseURL` 带尾斜杠时端点收到双斜杠路径，返回一个看起来不像认证错误的 400，掩盖真实的 401。已收敛到 `voice.ts` 的 `apiUrl()`；新增任何直连 fetch 复用它，不要手拼 URL。
+- **UI 自动化测试要显式给窗口真实 OS 焦点**：`executeJavaScript` 注入 `KeyboardEvent` 能触发 `document.addEventListener('keydown', …)` 里的应用内快捷键逻辑，但 `navigator.clipboard.writeText()` 之类依赖 focus 态的 API 在文档没有真实 OS 焦点时会以 `NotAllowedError: Document is not focused` 拒绝——测试用的 `BrowserWindow` 不会自动拿到系统焦点。测试脚本要显式 `app.focus({steal:true})` + `win.focus()` + `win.webContents.focus()`，否则任何剪贴板/焦点相关的快捷键测试都是假阴性，不是产品 bug（真实用户点开窗口这一步天然发生）。
