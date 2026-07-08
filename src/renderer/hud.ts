@@ -904,7 +904,8 @@ function escapeHtml(s: string): string {
 const $shortcutPanel = document.getElementById('shortcutPanel') as HTMLElement | null;
 
 function isTypingInInput(): boolean {
-  return document.activeElement === $text;
+  const el = document.activeElement;
+  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
 }
 
 function openShortcutPanel(): void {
