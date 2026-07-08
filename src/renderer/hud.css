@@ -1448,6 +1448,24 @@ html, body {
   box-shadow: none;
 }
 
+/* ============ Shortcut Panel (#shortcutPanel reuses .onboarding overlay) ============ */
+.shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.shortcut-table td {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.shortcut-table__key {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+  padding-right: 16px;
+}
+
 /* ============ Error Bubble ============ */
 /*
  * .bubble--error: visually distinct from .bubble--assistant (mint edge) —

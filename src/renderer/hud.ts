@@ -899,3 +899,84 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+// ============ 应用内快捷键 ============
+const $shortcutPanel = document.getElementById('shortcutPanel') as HTMLElement | null;
+
+function isTypingInInput(): boolean {
+  return document.activeElement === $text;
+}
+
+function openShortcutPanel(): void {
+  $shortcutPanel?.removeAttribute('hidden');
+}
+function closeShortcutPanel(): void {
+  $shortcutPanel?.setAttribute('hidden', '');
+}
+function toggleShortcutPanel(): void {
+  if (!$shortcutPanel) return;
+  if ($shortcutPanel.hasAttribute('hidden')) openShortcutPanel();
+  else closeShortcutPanel();
+}
+
+/** 复制最近一条嘴替主打回复（对话流里最后一个 assistant 气泡的正文）。无内容时静默忽略。 */
+function copyLastPrimary(): void {
+  const bubbles = document.querySelectorAll('.bubble--assistant .bubble__text');
+  const last = bubbles[bubbles.length - 1] as HTMLElement | undefined;
+  const text = last?.textContent?.trim();
+  if (!text) return;
+  void navigator.clipboard.writeText(text).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  });
+}
+
+/** 等价于点击「新对话」：结束当前保活会话 + 清空对话流。 */
+function startNewConversationViaShortcut(): void {
+  api.resetConversation();
+  clearTranscript();
+  firstTurnPending = true;
+}
+
+/** 循环切到 REPLY_STYLES 里的下一个风格，并持久化到配置。 */
+function cycleToNextStyle(): void {
+  const idx = REPLY_STYLES.findIndex((s) => s.id === currentStyle);
+  const next = REPLY_STYLES[(idx + 1) % REPLY_STYLES.length]!.id;
+  setCurrentStyle(next);
+  void api.setConfig({ ui: { defaultStyle: next } });
+}
+
+document.addEventListener('keydown', (e) => {
+  // "?" 打开/关闭快捷键面板：仅在非输入焦点时触发（避免打字时问号被吞）。
+  if (e.key === '?' && !isTypingInInput()) {
+    e.preventDefault();
+    toggleShortcutPanel();
+    return;
+  }
+  if (e.key === 'Escape' && $shortcutPanel && !$shortcutPanel.hasAttribute('hidden')) {
+    closeShortcutPanel();
+    return;
+  }
+  // 其余快捷键在输入框聚焦时不触发。
+  if (isTypingInInput()) return;
+
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod) return;
+
+  if (e.shiftKey && e.key.toLowerCase() === 'c') {
+    e.preventDefault();
+    copyLastPrimary();
+  } else if (!e.shiftKey && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    startNewConversationViaShortcut();
+  } else if (!e.shiftKey && e.key === '.') {
+    e.preventDefault();
+    cycleToNextStyle();
+  }
+});
+
+$('shortcutPanelClose')?.addEventListener('click', closeShortcutPanel);
