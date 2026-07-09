@@ -130,7 +130,7 @@ export class MiraConversation {
         rawPrimary += ame.delta;
         primary = stripToolInvocation(rawPrimary);
         callbacks?.onReplyChunk?.(primary);
-        if (!ttsStarted) {
+        if (!ttsStarted && skillRead !== 'reply') {
           const m = primary.match(FIRST_SENTENCE_END);
           if (m && m.index !== undefined) {
             const firstSentence = primary.slice(0, m.index + 1);
@@ -174,11 +174,14 @@ export class MiraConversation {
     }
 
     const emit = this.getEmit?.() ?? null;
-    if (ttsStarted && primary.length > ttsStartedLen) {
-      const remaining = primary.slice(ttsStartedLen).trim();
-      if (remaining) callbacks?.onTtsStart?.(remaining);
-    } else if (!ttsStarted && primary.trim()) {
-      callbacks?.onTtsStart?.(primary.trim());
+
+    // TTS 只读"能听的内容"，防止模型失控输出大段文字时被全文朗读。
+    const ttsText = this.pickTtsText(skillRead, primary, emit, ttsStarted, ttsStartedLen);
+    if (ttsText) {
+      log.info('conversation.tts.final', { runId, skillId: skillRead, ttsLen: ttsText.length, originalLen: primary.length });
+      callbacks?.onTtsStart?.(ttsText);
+    } else {
+      log.info('conversation.tts.skip', { runId, skillId: skillRead, primaryLen: primary.length });
     }
 
     const output: UniversalOutput = {
@@ -201,6 +204,52 @@ export class MiraConversation {
     this.turnCount++;
     log.info('conversation.turn.done', { runId, turn: this.turnCount, skillId: skillRead, latencyMs: summary.latencyMs, itemsCount: output.items.length });
     return { output, summary };
+  }
+
+  /**
+   * 从本轮产出中挑选要 TTS 朗读的文本。
+   * - reply：优先读 3 个候选选项；没产出 items 时回退读 primary 的前 80 字。
+   * - 其他技能：只读第一句/已朗读之后的剩余部分，且整体不超过 120 字，避免朗读论文。
+   */
+  private pickTtsText(
+    skillRead: string | undefined,
+    primary: string,
+    emit: EmitResult | null,
+    ttsStarted: boolean,
+    ttsStartedLen: number,
+  ): string {
+    const REPLY_FALLBACK_MAX = 80;
+    const OTHER_MAX = 120;
+
+    if (skillRead === 'reply') {
+      if (emit?.items?.length) {
+        // 每条选项最多读 100 字，避免 3 条长文拼接超长 TTS
+        const REPLY_ITEM_MAX = 100;
+        const parts = emit.items.map((it, i) => {
+          const text = it.text.length > REPLY_ITEM_MAX ? it.text.slice(0, REPLY_ITEM_MAX) + '…' : it.text;
+          return `选项${i + 1}：${text}`;
+        });
+        return parts.join('；');
+      }
+      const t = primary.trim();
+      if (!t) return '';
+      if (t.length > REPLY_FALLBACK_MAX) {
+        log.warn('conversation.reply.protocolViolation', { primaryLen: t.length, preview: t.slice(0, 60) });
+      }
+      return t.slice(0, REPLY_FALLBACK_MAX);
+    }
+
+    const base = ttsStarted && primary.length > ttsStartedLen
+      ? primary.slice(ttsStartedLen).trim()
+      : primary.trim();
+    if (!base) return '';
+    if (base.length > OTHER_MAX) {
+      // 尽量停在句末，避免截在半句话中间
+      const cut = base.slice(0, OTHER_MAX);
+      const lastStop = Math.max(cut.lastIndexOf('。'), cut.lastIndexOf('！'), cut.lastIndexOf('？'), cut.lastIndexOf('.'), cut.lastIndexOf('!'), cut.lastIndexOf('?'));
+      return lastStop > 20 ? cut.slice(0, lastStop + 1) : cut + '…';
+    }
+    return base;
   }
 
   dispose(): void {

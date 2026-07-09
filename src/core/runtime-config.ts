@@ -7,7 +7,7 @@ const DEFAULTS = {
   asrLang: 'zh' as const,
   ttsModel: 'mimo-v2.5-tts',
   ttsVoice: '冰糖',
-  wakeThreshold: 0.5,
+  wakeThreshold: 0.3,
   defaultStyle: 'empathy',
   ttsEnabled: true,
 };
@@ -56,11 +56,13 @@ export function getAdvanced(): { wakeThreshold: number } {
   ensure();
   return { wakeThreshold: file.advanced.wakeThreshold !== undefined ? file.advanced.wakeThreshold : DEFAULTS.wakeThreshold };
 }
-export function getUi(): { defaultStyle: string; ttsEnabled: boolean } {
+export function getUi(): { defaultStyle: string; ttsEnabled: boolean; sfxEnabled: boolean; sfxVolume: number } {
   ensure();
   return {
     defaultStyle: file.ui.defaultStyle ?? DEFAULTS.defaultStyle,
     ttsEnabled: file.ui.ttsEnabled !== undefined ? file.ui.ttsEnabled : DEFAULTS.ttsEnabled,
+    sfxEnabled: file.ui.sfxEnabled !== undefined ? file.ui.sfxEnabled : true,
+    sfxVolume: typeof file.ui.sfxVolume === 'number' ? file.ui.sfxVolume : 0.5,
   };
 }
 export function getEffectiveConfig(): ZuitiConfig {

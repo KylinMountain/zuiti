@@ -35,3 +35,21 @@ test('未定义转换：保持原状态', () => {
 test('TTS 无音频块时 thinking 也能回流 listening（不卡死）', () => {
   assert.equal(nextConvState('thinking', 'ttsDone'), 'listening');
 });
+
+// ---- plan-13: barge-in 打断 ----
+test('barge-in 打断 TTS 抢麦：speaking → listening', () => {
+  assert.equal(nextConvState('speaking', 'bargeIn'), 'listening');
+});
+test('barge-out 打断 TTS 回 idle：speaking → idle', () => {
+  assert.equal(nextConvState('speaking', 'bargeOut'), 'idle');
+});
+test('barge-in 只在 speaking 有效，其他状态不变', () => {
+  assert.equal(nextConvState('idle', 'bargeIn'), 'idle');
+  assert.equal(nextConvState('listening', 'bargeIn'), 'listening');
+  assert.equal(nextConvState('thinking', 'bargeIn'), 'thinking');
+});
+test('barge-out 只在 speaking 有效，其他状态不变', () => {
+  assert.equal(nextConvState('idle', 'bargeOut'), 'idle');
+  assert.equal(nextConvState('listening', 'bargeOut'), 'listening');
+  assert.equal(nextConvState('thinking', 'bargeOut'), 'thinking');
+});

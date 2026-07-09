@@ -18,11 +18,14 @@ export function pngToDataUrl(pngBytes: Uint8Array): string {
  */
 export async function captureScreen(): Promise<Uint8Array> {
   // 动态 import electron，避免 core 层静态依赖 electron（保持 core 可在纯 Node 测试）
-  const { desktopCapturer } = await import('electron');
+  const { desktopCapturer, screen } = await import('electron');
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1920, height: 1080 } });
-  const primary = sources[0];
-  if (!primary) throw new Error('截屏失败：找不到屏幕源');
+  if (sources.length === 0) throw new Error('截屏失败：找不到屏幕源');
+  // 优先截光标所在屏幕（多显示器场景下不会截错屏）
+  const cursor = screen.getCursorScreenPoint();
+  const cursorDisplay = screen.getDisplayNearestPoint(cursor);
+  const primary = sources.find((s) => s.display_id === String(cursorDisplay.id)) ?? sources[0]!;
   const png = primary.thumbnail.toPNG();
-  log.info('screenshot.captured', { bytes: png.length });
+  log.info('screenshot.captured', { bytes: png.length, sourceId: primary.id, displayId: cursorDisplay.id });
   return new Uint8Array(png);
 }

@@ -10,7 +10,6 @@
   <!-- 动态背景层 -->
   <div class="bg">
     <div class="bg__gradient"></div>
-    <div class="bg__noise"></div>
     <div class="bg__grid"></div>
     <div class="bg__orb bg__orb--pink"></div>
     <div class="bg__orb bg__orb--purple"></div>
@@ -19,24 +18,19 @@
   </div>
 
   <div class="app app--sidepanel">
-    <!-- 窄头部 -->
+    <!-- 顶部：品牌 + 状态 + 最小化控件 -->
     <header class="topbar">
-      <div class="topbar__avatar" id="avatar">
+      <div class="topbar__brand" id="avatar">
         <div class="avatar">
           <svg class="avatar__face" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <!-- 脸 -->
             <circle cx="60" cy="60" r="50" fill="url(#faceGrad)" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
-            <!-- 眼睛 -->
             <ellipse class="avatar__eye avatar__eye--left" cx="42" cy="52" rx="6" ry="7" fill="#1a0a1a"/>
             <ellipse class="avatar__eye avatar__eye--right" cx="78" cy="52" rx="6" ry="7" fill="#1a0a1a"/>
             <circle class="avatar__eye-shine" cx="44" cy="50" r="2" fill="#fff" opacity="0.6"/>
             <circle class="avatar__eye-shine" cx="80" cy="50" r="2" fill="#fff" opacity="0.6"/>
-            <!-- 腮红 -->
             <ellipse cx="30" cy="68" rx="10" ry="5" fill="#ff4d82" opacity="0.3"/>
             <ellipse cx="90" cy="68" rx="10" ry="5" fill="#ff4d82" opacity="0.3"/>
-            <!-- 嘴（可动画） -->
             <path class="avatar__mouth" d="M 40 78 Q 60 88 80 78" stroke="#1a0a1a" stroke-width="3" stroke-linecap="round" fill="none"/>
-            <!-- 牙 -->
             <rect class="avatar__teeth" x="50" y="79" width="20" height="4" rx="1" fill="#fff" opacity="0"/>
             <defs>
               <linearGradient id="faceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -45,7 +39,6 @@
               </linearGradient>
             </defs>
           </svg>
-          <!-- 光晕 -->
           <div class="avatar__halo"></div>
           <div class="avatar__halo avatar__halo--2"></div>
           <svg class="avatar__orbit" viewBox="0 0 120 120" fill="none">
@@ -65,19 +58,25 @@
         <span class="topbar__title">嘴替</span>
         <span class="topbar__status" id="moodText">待唤醒 · 喊我「Jarvis」</span>
       </div>
-      <div class="wave" id="wave" hidden><span></span><span></span><span></span><span></span><span></span></div>
-      <button class="iconbtn" id="newConvBtn" type="button" title="新对话">＋</button>
+      <div class="topbar__status-wave" id="wave" hidden><span></span><span></span><span></span><span></span><span></span></div>
+      <button class="iconbtn" id="newConvBtn" type="button" title="新对话 (⌘N)">＋</button>
       <button class="iconbtn settings-btn" id="settingsBtn" type="button" title="设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
+          <path d="M4 21v-7"></path>
+          <path d="M4 10V3"></path>
+          <path d="M12 21v-9"></path>
+          <path d="M12 8V3"></path>
+          <path d="M20 21v-5"></path>
+          <path d="M20 12V3"></path>
+          <path d="M1 14h6"></path>
+          <path d="M9 8h6"></path>
+          <path d="M17 16h6"></path>
         </svg>
       </button>
-      <button class="status-dot" id="connDot" type="button" title="连接状态"></button>
       <button class="iconbtn" id="collapseBtn" type="button" title="收起">⟩</button>
     </header>
 
-    <!-- Settings Panel -->
+    <!-- 设置面板 -->
     <aside class="settings-panel" id="settingsPanel" hidden>
       <div class="settings-panel__header">
         <span class="settings-panel__title">设置</span>
@@ -86,7 +85,6 @@
         </button>
       </div>
       <div class="settings-panel__body">
-        <!-- 凭证 -->
         <div class="settings-group">
           <div class="settings-group__title">凭证</div>
           <label class="settings-item"><span>API Key</span><input type="password" id="cfgApiKey" placeholder="tp-..." /></label>
@@ -96,7 +94,6 @@
             <span class="settings-test__result" id="testLlmResult"></span>
           </div>
         </div>
-        <!-- 模型 -->
         <div class="settings-group">
           <div class="settings-group__title">模型</div>
           <label class="settings-item"><span>LLM 模型</span><input type="text" id="cfgLlmModel" placeholder="mimo-v2.5-pro" /></label>
@@ -104,10 +101,8 @@
           <label class="settings-item"><span>TTS 模型</span><input type="text" id="cfgTtsModel" placeholder="mimo-v2.5-tts" /></label>
           <label class="settings-item"><span>TTS 音色</span><input type="text" id="cfgTtsVoice" placeholder="冰糖" /></label>
         </div>
-        <!-- 偏好 -->
         <div class="settings-group">
           <div class="settings-group__title">偏好</div>
-          <!-- Default Style -->
           <div class="settings-item">
             <label class="settings-item__label">默认风格</label>
             <select class="settings-item__select" id="settingDefaultStyle">
@@ -118,7 +113,6 @@
               <option value="english">🌍 英文</option>
             </select>
           </div>
-          <!-- TTS Toggle -->
           <div class="settings-item">
             <label class="settings-item__label">语音朗读 (TTS)</label>
             <label class="settings-item__toggle">
@@ -126,14 +120,29 @@
               <span class="settings-item__toggle-track"></span>
             </label>
           </div>
-          <!-- Wake Threshold -->
+          <div class="settings-item">
+            <label class="settings-item__label">音效反馈</label>
+            <label class="settings-item__toggle">
+              <input type="checkbox" id="settingSfx" checked />
+              <span class="settings-item__toggle-track"></span>
+            </label>
+          </div>
+          <div class="settings-item">
+            <label class="settings-item__label">音效音量</label>
+            <input type="range" class="settings-item__range" id="settingSfxVolume" min="0" max="100" value="50" />
+          </div>
           <div class="settings-item">
             <label class="settings-item__label">唤醒灵敏度</label>
             <input type="range" class="settings-item__range" id="settingWakeThreshold" min="0" max="100" value="50" />
           </div>
+          <div class="settings-item">
+            <label class="settings-item__label">唤醒统计</label>
+            <span class="settings-item__hint" id="wakeStatsText">—</span>
+            <button class="settings-test" id="wakeStatsReset" type="button">重置</button>
+          </div>
         </div>
-        <!-- 诊断 -->
-        <div class="settings-group"><div class="settings-group__title">诊断</div>
+        <div class="settings-group">
+          <div class="settings-group__title">诊断</div>
           <div class="diag-stats" id="diagStats">—</div>
           <div class="settings-item settings-item--actions">
             <button class="settings-test" id="openLogs" type="button">打开日志目录</button>
@@ -141,14 +150,12 @@
             <span class="settings-test__result" id="exportResult"></span>
           </div>
         </div>
-        <!-- 版本 -->
         <div class="settings-item settings-item--info">
           <span class="settings-item__label">版本</span>
           <span class="settings-item__value">0.1.0</span>
         </div>
       </div>
 
-      <!-- 历史记录（折入设置面板） -->
       <div class="settings-panel__body">
         <section class="history-section" id="historySection">
           <button class="history-toggle" id="historyToggle" type="button">
@@ -178,7 +185,7 @@
     <!-- 对话流 -->
     <main class="transcript" id="transcript">
       <div class="transcript__empty" id="transcriptEmpty">
-        <p>喊一声「Jarvis」，或点下面麦克风，直接开聊。</p>
+        <p>喊一声「Jarvis」，或直接输入，我帮你把话说漂亮。</p>
         <div class="scene-shortcuts" id="sceneShortcuts">
           <button class="scene-chip" data-prompt="帮我回这条消息，高情商一点" type="button">
             <span>💘</span>恋爱救场
@@ -199,27 +206,34 @@
     <!-- 底部输入坞 -->
     <footer class="dock">
       <div class="style-bar"><div class="style-bar__pills" id="stylePills"></div></div>
-      <div class="input-wrap">
-        <textarea id="text" placeholder="说句真心话…想怼啥、想撩啥、想请假，尽管说" rows="2"></textarea>
-      </div>
-      <div class="dock__actions">
-        <label class="screen-toggle"><input type="checkbox" id="screenshot" checked /><span class="screen-toggle__label">看屏</span></label>
-        <button class="iconbtn" id="relookBtn" type="button" title="再看一次屏">👀再看</button>
-        <button id="mic" class="mic-btn" type="button">
-          <span class="mic-btn__ring"></span>
-          <span class="mic-btn__core">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" fill="currentColor"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              <path d="M12 19v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <span class="mic-btn__label">说</span>
-        </button>
-        <button id="go" class="fire-btn"><span class="fire-btn__text">发</span></button>
+      <div class="input-area">
+        <div class="input-wrap">
+          <textarea id="text" placeholder="想回什么，直接说…" rows="1"></textarea>
+          <div class="input-actions">
+            <button id="mic" class="mic-btn" type="button" title="语音输入">
+              <span class="mic-btn__ring"></span>
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" fill="currentColor"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 19v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button id="go" class="send-btn" type="button" title="发送 (Enter)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="dock__toolbar">
+          <label class="screen-toggle"><input type="checkbox" id="screenshot" checked /><span class="screen-toggle__label">看屏</span></label>
+          <span class="dock__hint">Enter 发送 · Shift+Enter 换行</span>
+        </div>
       </div>
       <div id="voiceState" class="voice-state" hidden></div>
     </footer>
+
     <!-- 首次向导覆盖层 -->
     <div class="onboarding" id="onboarding" hidden>
       <div class="onboarding__card">
@@ -243,7 +257,8 @@
         <table class="shortcut-table">
           <tbody>
             <tr><td class="shortcut-table__key">Cmd/Ctrl + Shift + J</td><td>全局唤起嘴替面板</td></tr>
-            <tr><td class="shortcut-table__key">Cmd/Ctrl + Enter</td><td>发送当前输入</td></tr>
+            <tr><td class="shortcut-table__key">Enter</td><td>发送当前输入</td></tr>
+            <tr><td class="shortcut-table__key">Shift + Enter</td><td>换行</td></tr>
             <tr><td class="shortcut-table__key">Cmd/Ctrl + Shift + C</td><td>复制上一条主打回复</td></tr>
             <tr><td class="shortcut-table__key">Cmd/Ctrl + N</td><td>新对话</td></tr>
             <tr><td class="shortcut-table__key">Cmd/Ctrl + .</td><td>切下一个风格</td></tr>
@@ -265,8 +280,8 @@
       if (!canvas) return;
       var ctx = canvas.getContext('2d');
       var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      var PARTICLE_COUNT = 18;
-      var CONNECT_DIST = 100;
+      var PARTICLE_COUNT = 14;
+      var CONNECT_DIST = 90;
       var particles = [];
 
       function resize() {
@@ -280,10 +295,10 @@
         return {
           x: Math.random() * canvas.width,
           y: Math.random() * canvas.height,
-          r: 1 + Math.random(),           // 1-2px
-          vx: (Math.random() - 0.5) * 0.3,
-          vy: (Math.random() - 0.5) * 0.3,
-          opacity: 0.15 + Math.random() * 0.25  // 0.15-0.4
+          r: 1 + Math.random(),
+          vx: (Math.random() - 0.5) * 0.25,
+          vy: (Math.random() - 0.5) * 0.25,
+          opacity: 0.12 + Math.random() * 0.20
         };
       }
 
@@ -291,8 +306,6 @@
 
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        /* connecting lines */
         for (var i = 0; i < particles.length; i++) {
           for (var j = i + 1; j < particles.length; j++) {
             var dx = particles[i].x - particles[j].x;
@@ -302,22 +315,18 @@
               ctx.beginPath();
               ctx.moveTo(particles[i].x, particles[i].y);
               ctx.lineTo(particles[j].x, particles[j].y);
-              ctx.strokeStyle = 'rgba(62, 234, 170, 0.08)';
+              ctx.strokeStyle = 'rgba(62, 234, 170, 0.06)';
               ctx.lineWidth = 0.5;
               ctx.stroke();
             }
           }
         }
-
-        /* particles */
         for (var k = 0; k < particles.length; k++) {
           var p = particles[k];
           ctx.beginPath();
           ctx.arc(p.x, p.y, Math.max(0.5, p.r), 0, Math.PI * 2);
           ctx.fillStyle = 'rgba(62, 234, 170, ' + p.opacity + ')';
           ctx.fill();
-
-          /* drift */
           p.x += p.vx;
           p.y += p.vy;
           if (p.x < -10) p.x = canvas.width + 10;
@@ -325,14 +334,13 @@
           if (p.y < -10) p.y = canvas.height + 10;
           if (p.y > canvas.height + 10) p.y = -10;
         }
-
         if (!reducedMotion) requestAnimationFrame(draw);
       }
 
       if (!reducedMotion) {
         requestAnimationFrame(draw);
       } else {
-        draw(); // single static frame
+        draw();
       }
     })();
   </script>

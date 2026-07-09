@@ -21,18 +21,37 @@ import { MiraConversation } from '../modules/mira/conversation.js';
 import { join, resolve } from 'node:path';
 import { CHANNELS, type Capabilities, type WakeRuntime, type ReplyStyle, type DiagStatsDTO } from '../shared/ipc.js';
 import { loadConfig, saveConfig } from '../core/config-store.js';
-import { initRuntimeConfig, getEffectiveConfig } from '../core/runtime-config.js';
+import { initRuntimeConfig, getEffectiveConfig, getAsr } from '../core/runtime-config.js';
 import { checkAll, checkLlm, checkAsr, checkTts, type HealthResult } from '../core/service-health.js';
 import { classifyError, isClassifiedError } from '../core/errors.js';
 import { readRecentRuns, aggregateRuns, buildDiagnostics } from '../core/diagnostics.js';
+import { loadWakeStats, saveWakeStats } from '../core/wake-stats-store.js';
+import { recordHit, recordMiss, summarize, EMPTY_WAKE_STATS, type WakeStats, type WakeMissReason } from '../shared/wake-stats.js';
 
 /**
  * 注册 coach + voice + capabilities IPC handlers。主进程启动时调用一次。
  * @param wake 唤醒词运行时（null 时功能关闭，渲染层不启动 openWakeWord）。
  */
-export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): { endConversation: () => void } {
+export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | null): { endConversation: () => void; onWakeHit: () => void } {
   const userDataDir = app.getPath('userData');
   let lastHealth: HealthResult[] = [];
+
+  // ---- plan-13: 唤醒词误触发统计 ----
+  let pendingWakeAt: number | null = null;
+  let pendingWakeTimer: ReturnType<typeof setTimeout> | null = null;
+  const NO_SPEECH_MS = 10_000;
+  let wakeStats: WakeStats = loadWakeStats(userDataDir);
+
+  function recordWakeHit(): void {
+    wakeStats = recordHit(wakeStats);
+    saveWakeStats(userDataDir, wakeStats);
+    log.info('wake.stats.hit', { hits: wakeStats.hits, misses: wakeStats.misses });
+  }
+  function recordWakeMiss(reason: WakeMissReason): void {
+    wakeStats = recordMiss(wakeStats, reason);
+    saveWakeStats(userDataDir, wakeStats);
+    log.info('wake.stats.miss', { reason, hits: wakeStats.hits, misses: wakeStats.misses });
+  }
   function isConfigured(): boolean {
     const c = getEffectiveConfig().credential;
     const llmOk = lastHealth.find((h) => h.service === 'llm')?.ok;
@@ -93,6 +112,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
       withScreenshot,
     });
     mainWindow.webContents.send(CHANNELS.coachLoading);
+    ttsAbortFlag = false; // plan-13: 每轮重置 barge-in 中止标志
 
     let screenshotDataUrl: string | undefined;
     if (withScreenshot) {
@@ -137,7 +157,8 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
       // 避免中途 ttsDone 提前重开麦 + 播放时序错乱（几段一起读）。无 TTS（纯候选/空 primary）
       // 时队列已 resolved，立即发 done，让状态机从 thinking 回流 listening。
       await ttsQueue;
-      mainWindow.webContents.send(CHANNELS.voiceTtsDone);
+      // plan-13: barge-in 已打断时，渲染层已自行处理状态转换，不重复发 ttsDone。
+      if (!ttsAbortFlag) mainWindow.webContents.send(CHANNELS.voiceTtsDone);
 
       // Append to history
       try {
@@ -171,14 +192,18 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
 
   /** TTS 串行队列：首句先播，剩余文本排队等播完再播，避免并发混音。 */
   let ttsQueue: Promise<void> = Promise.resolve();
+  /** plan-13: barge-in 中止标志——true 时 startTtsStream 跳过推 chunk，runSkillPipeline 不发 ttsDone。 */
+  let ttsAbortFlag = false;
 
   /** TTS 流式合成 + 推给渲染层音频块。串行排队；ttsDone 由 runSkillPipeline 在队列排空后统一发一次。 */
   function startTtsStream(text: string, win: BrowserWindow): void {
     ttsQueue = ttsQueue.then(async () => {
+      if (ttsAbortFlag) return; // 已打断，跳过
       const t0 = Date.now();
       let chunkCount = 0;
       try {
         for await (const chunk of await synthesizeSpeechStream(text)) {
+          if (ttsAbortFlag) break; // 中途打断，停止推 chunk
           chunkCount++;
           win.webContents.send(CHANNELS.voiceTtsChunk, Buffer.from(chunk).toString('base64'));
         }
@@ -206,13 +231,18 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
       try {
         const { mime, bytes } = parseDataUrl(base64DataUrl);
         const audioMime = mimeToAudioMime(mime);
-        const text = (await transcribeAudio(bytes, audioMime, 'zh')).trim();
+        const asrLang = getAsr().lang;
+        const text = (await transcribeAudio(bytes, audioMime, asrLang)).trim();
         log.info('voice.transcript', { textLen: text.length });
 
         if (!text) {
+          // plan-13: 唤醒后 ASR 空 → 误触发
+          if (pendingWakeAt !== null) { recordWakeMiss('asrEmpty'); pendingWakeAt = null; }
           mainWindow.webContents.send(CHANNELS.coachError, classifyError({ code: 'asrEmpty' }));
           return;
         }
+        // plan-13: 唤醒后 ASR 有结果 → 命中
+        if (pendingWakeAt !== null) { recordWakeHit(); pendingWakeAt = null; }
         mainWindow.webContents.send(CHANNELS.voiceTranscript, text);
         await runSkillPipeline(text, withScreenshot, style);
       } catch (err) {
@@ -231,6 +261,21 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
 
   ipcMain.on(CHANNELS.conversationReset, () => {
     endConversation();
+  });
+
+  // plan-13: barge-in 打断——渲染层通知主进程停止 TTS 合成。
+  ipcMain.on(CHANNELS.voiceBargeIn, () => {
+    ttsAbortFlag = true;
+    log.info('coach.bargeIn');
+  });
+
+  // ---- plan-13: 唤醒词统计 IPC ----
+  ipcMain.handle(CHANNELS.wakeStatsGet, (): WakeStats => wakeStats);
+  ipcMain.handle(CHANNELS.wakeStatsReset, (): WakeStats => {
+    wakeStats = { ...EMPTY_WAKE_STATS };
+    saveWakeStats(userDataDir, wakeStats);
+    log.info('wake.stats.reset');
+    return wakeStats;
   });
 
   // ---- History IPC ----
@@ -272,7 +317,7 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
   });
 
   // ---- Diagnostics IPC ----
-  const logsDir = resolve(process.cwd(), 'logs');
+  const logsDir = app.getPath('logs');
   const versions = { version: app.getVersion(), electron: process.versions.electron, node: process.versions.node };
 
   ipcMain.handle(CHANNELS.diagGet, (): DiagStatsDTO => aggregateRuns(readRecentRuns(logsDir, 20)));
@@ -286,5 +331,19 @@ export function registerCoachIpc(mainWindow: BrowserWindow, wake: WakeRuntime | 
     return file;
   });
 
-  return { endConversation };
+  /** plan-13: 唤醒词命中时调用——起 10s 待判定计时，超时未说话记 miss(noSpeechTimeout)。 */
+  function onWakeHit(): void {
+    // 清理前一个待判定计时，避免竞态：旧 timeout 误为新唤醒记 miss
+    if (pendingWakeTimer) { clearTimeout(pendingWakeTimer); pendingWakeTimer = null; }
+    pendingWakeAt = Date.now();
+    pendingWakeTimer = setTimeout(() => {
+      pendingWakeTimer = null;
+      if (pendingWakeAt !== null) {
+        recordWakeMiss('noSpeechTimeout');
+        pendingWakeAt = null;
+      }
+    }, NO_SPEECH_MS);
+  }
+
+  return { endConversation, onWakeHit };
 }

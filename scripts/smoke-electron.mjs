@@ -49,6 +49,7 @@ setTimeout(() => { log('smoke.watchdog'); app.exit(2); }, 150000);
 
 async function main() {
   const startTs = Date.now();
+  let plan13 = null;
   log('smoke.electron.start', { turn1: TURN1, turn2: TURN2, withScreenshot: WITH_SCREENSHOT });
   await app.whenReady();
   session.defaultSession.setPermissionRequestHandler((_wc, p, cb) => cb(p === 'media'));
@@ -110,6 +111,45 @@ async function main() {
     log('smoke.errorPath.pass', { kind: errKind });
   }
 
+  // ── plan-13 可观测：sfx config 往返 + wake stats IPC + 设置面板控件存在性 ──
+  // 不依赖 LLM key，纯渲染层 + IPC。barge-in 实听 / 音效实听需人工，见 design doc smoke 清单。
+  plan13 = await win.webContents.executeJavaScript(`
+    (async () => {
+      const out = {};
+      // 1. 设置面板新控件存在性
+      out.sfxToggleExists = !!document.getElementById('settingSfx');
+      out.sfxVolumeExists = !!document.getElementById('settingSfxVolume');
+      out.wakeStatsTextExists = !!document.getElementById('wakeStatsText');
+      out.wakeStatsResetExists = !!document.getElementById('wakeStatsReset');
+      // 2. wake stats IPC 往返
+      out.wakeStatsBefore = await window.zuiti.getWakeStats();
+      // 3. reset 往返
+      out.wakeStatsAfterReset = await window.zuiti.resetWakeStats();
+      // 4. sfx config 往返
+      await window.zuiti.setConfig({ ui: { sfxEnabled: false, sfxVolume: 0.3 } });
+      const cfg = await window.zuiti.getConfig();
+      out.sfxConfigRoundTrip = { sfxEnabled: cfg.ui.sfxEnabled, sfxVolume: cfg.ui.sfxVolume };
+      // 恢复默认
+      await window.zuiti.setConfig({ ui: { sfxEnabled: true, sfxVolume: 0.5 } });
+      // 5. bargeIn API 存在性（不实际触发，避免干扰后续两轮）
+      out.bargeInApiExists = typeof window.zuiti.bargeIn === 'function';
+      return out;
+    })()
+  `);
+  log('smoke.plan13', plan13);
+  if (!plan13.sfxToggleExists) throw new Error('smoke: #settingSfx not found');
+  if (!plan13.sfxVolumeExists) throw new Error('smoke: #settingSfxVolume not found');
+  if (!plan13.wakeStatsTextExists) throw new Error('smoke: #wakeStatsText not found');
+  if (!plan13.wakeStatsResetExists) throw new Error('smoke: #wakeStatsReset not found');
+  if (plan13.wakeStatsAfterReset.hits !== 0 || plan13.wakeStatsAfterReset.misses !== 0) {
+    throw new Error('smoke: resetWakeStats did not zero stats: ' + JSON.stringify(plan13.wakeStatsAfterReset));
+  }
+  if (plan13.sfxConfigRoundTrip.sfxEnabled !== false || plan13.sfxConfigRoundTrip.sfxVolume !== 0.3) {
+    throw new Error('smoke: sfx config round-trip failed: ' + JSON.stringify(plan13.sfxConfigRoundTrip));
+  }
+  if (!plan13.bargeInApiExists) throw new Error('smoke: window.zuiti.bargeIn not exposed');
+  log('smoke.plan13.pass');
+
   // 恢复可用凭证（若有效 key 可用则继续两轮记忆测试）
   // 同上：不加 "; true;"，让 setConfig 的 Promise 成为完成值，确保配置真正落盘后才继续。
   const hasValidKey = !!process.env.LLM_API_KEY;
@@ -170,6 +210,7 @@ async function main() {
     totalMs: Date.now() - startTs,
     caps: { asr: caps.asr, tts: caps.tts, wake: !!caps.wake },
     errorPath: { kind: errEvt?.kind, hasErrorBubble },
+    plan13,
     ...(hasValidKey ? {
       turn1: { skillId: t1.skillId, primary: t1.primary?.text?.slice(0, 160), items: t1.items?.length ?? 0 },
       turn2: { skillId: t2.skillId, primary: t2.primary?.text?.slice(0, 160), items: t2.items?.length ?? 0 },
@@ -188,6 +229,13 @@ async function main() {
   log('smoke.electron.pass', { memoryRecalled, outFile });
   console.log('\n[smoke-electron] PASS ✅');
   console.log('  errorPath:', { kind: errEvt?.kind, hasErrorBubble });
+  console.log('  plan13:', {
+    sfxControls: !!plan13?.sfxToggleExists && !!plan13?.sfxVolumeExists,
+    wakeStatsControls: !!plan13?.wakeStatsTextExists && !!plan13?.wakeStatsResetExists,
+    wakeStatsReset: plan13?.wakeStatsAfterReset,
+    sfxConfigRoundTrip: plan13?.sfxConfigRoundTrip,
+    bargeInApi: plan13?.bargeInApiExists,
+  });
   if (hasValidKey) {
     console.log('  turn1:', result.turn1?.primary);
     console.log('  turn2:', result.turn2?.primary, '| memoryRecalled:', memoryRecalled);

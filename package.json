@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build:node": "tsc -p tsconfig.json",
-    "build:renderer": "esbuild src/renderer/hud.ts --bundle --format=esm --target=chrome120 --outfile=dist/renderer/hud.js && node scripts/copy-assets.mjs",
+    "build:renderer": "esbuild src/renderer/hud.ts --bundle --format=esm --target=chrome120 --loader:.wav=dataurl --outfile=dist/renderer/hud.js && node scripts/copy-assets.mjs",
     "build": "npm run build:node && npm run build:renderer",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "test": "npm run build:node && node --test \"dist/test/*.test.js\"",
@@ -23,7 +23,10 @@
     "dev:log": "npm run build && electron . 2>&1 | tee -a logs/app-$(date +%Y%m%d-%H%M%S).log",
     "log:latest": "ls -t logs/app/*.log 2>/dev/null | head -1",
     "log:tail": "tail -f $(ls -t logs/app/*.log 2>/dev/null | head -1)",
-    "push": "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git push \"$@\""
+    "push": "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git push \"$@\"",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac --arm64",
+    "dist:win": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.80.2",
@@ -36,7 +39,42 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.1",
     "typescript": "^5.6.0"
+  },
+  "build": {
+    "appId": "io.trae.zuiti",
+    "productName": "嘴替",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "skills/**/*",
+      "models/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

@@ -8,7 +8,7 @@ test('默认值（无 file 无 env）', () => {
   assert.equal(getLlmModel(), 'mimo-v2.5-pro');
   assert.deepEqual(getAsr(), { model: 'mimo-v2.5-asr', lang: 'zh' });
   assert.deepEqual(getTts(), { model: 'mimo-v2.5-tts', voice: '冰糖' });
-  assert.equal(getAdvanced().wakeThreshold, 0.5);
+  assert.equal(getAdvanced().wakeThreshold, 0.3);
   assert.deepEqual(getCredential(), { apiKey: undefined, baseURL: undefined });
 });
 test('env 覆盖默认', () => {

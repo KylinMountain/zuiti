@@ -18,6 +18,11 @@ ort.env.wasm.numThreads = 1;
 ort.env.wasm.proxy = false;
 ort.env.wasm.wasmPaths = './';
 
+// plan-13 诊断：渲染层日志转发到主进程（openWakeWord 的 console.error 不进 logs/app/）
+function rlog(level: string, msg: string, extra?: Record<string, unknown>): void {
+  try { (window as any).zuiti?.rlog?.(level, msg, extra); } catch { /* ignore */ }
+}
+
 export interface OwwModels {
   mel: Uint8Array;
   emb: Uint8Array;
@@ -60,6 +65,8 @@ export class OpenWakeWord {
   // 帧队列：永不丢当前帧；忙时入队，单 drainer 顺序消费。
   private queue: Int16Array[] = [];
   private draining = false;
+  private frameCount = 0; // plan-13 诊断
+  private lastStatAt = 0;
 
   private constructor(
     private readonly threshold: number,
@@ -77,14 +84,24 @@ export class OpenWakeWord {
   ): Promise<OpenWakeWord> {
     const t = Math.min(0.99, Math.max(MIN_THRESHOLD, threshold));
     const oww = new OpenWakeWord(t, onWake, debug);
+    rlog('info', 'oww.create.start', { threshold: t });
     const opt: ort.InferenceSession.SessionOptions = { executionProviders: ['wasm'] };
-    oww.melSess = await ort.InferenceSession.create(models.mel, opt);
-    oww.embSess = await ort.InferenceSession.create(models.emb, opt);
-    oww.wwSess = await ort.InferenceSession.create(models.ww, opt);
-    oww.melIn = oww.melSess.inputNames[0];
-    oww.embIn = oww.embSess.inputNames[0];
-    oww.wwIn = oww.wwSess.inputNames[0];
-    return oww;
+    try {
+      oww.melSess = await ort.InferenceSession.create(models.mel, opt);
+      rlog('info', 'oww.melSess.ok');
+      oww.embSess = await ort.InferenceSession.create(models.emb, opt);
+      rlog('info', 'oww.embSess.ok');
+      oww.wwSess = await ort.InferenceSession.create(models.ww, opt);
+      rlog('info', 'oww.wwSess.ok');
+      oww.melIn = oww.melSess.inputNames[0];
+      oww.embIn = oww.embSess.inputNames[0];
+      oww.wwIn = oww.wwSess.inputNames[0];
+      rlog('info', 'oww.create.done');
+      return oww;
+    } catch (e) {
+      rlog('error', 'oww.create.failed', { msg: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
   }
 
   /** PvEngine 接口：WebVoiceProcessor 推帧进来。 */
@@ -92,6 +109,13 @@ export class OpenWakeWord {
     if (e.command !== 'process') return;
     this.queue.push(e.inputFrame);
     if (this.queue.length > MAX_QUEUE) this.queue.shift(); // 落后太多才丢最旧帧
+    // plan-13 诊断：每 50 帧（~4s）记一次，确认 mic 喂帧正常
+    this.frameCount++;
+    const now = Date.now();
+    if (now - this.lastStatAt > 4000) {
+      this.lastStatAt = now;
+      rlog('info', 'oww.frameStat', { frames: this.frameCount, featLen: this.featLen, queueLen: this.queue.length });
+    }
     void this.drain();
   };
 
@@ -103,7 +127,7 @@ export class OpenWakeWord {
         await this.process(this.queue.shift()!);
       }
     } catch (err) {
-      console.error('openWakeWord processing error:', err);
+      rlog('error', 'oww.process.error', { msg: err instanceof Error ? err.message : String(err) });
     } finally {
       this.draining = false;
     }
@@ -214,8 +238,13 @@ export class OpenWakeWord {
     // 3) wakeword 检出
     if (this.featLen >= N_FEAT) {
       const score = await this.wakeword();
+      // plan-13 诊断：score 超过 0.1 就记日志（低于阈值的近距触发），方便调阈值
+      if (score > 0.1) {
+        rlog('info', 'oww.score.near', { score: Number(score.toFixed(4)), threshold: this.threshold });
+      }
       if (this.debug) console.log(`[wake] score=${score.toFixed(4)} thr=${this.threshold}`);
       if (score >= this.threshold && Date.now() - this.lastFire > REFIRE_MS) {
+        rlog('info', 'oww.score.hit', { score: Number(score.toFixed(4)), threshold: this.threshold });
         this.lastFire = Date.now();
         this.onWake();
       }

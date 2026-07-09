@@ -15,7 +15,7 @@ import { CHANNELS, type WakeRuntime } from '../shared/ipc.js';
 import { log } from '../core/log.js';
 import { writeCrashReport } from '../core/crash.js';
 import { loadConfig, saveConfig } from '../core/config-store.js';
-import { initRuntimeConfig } from '../core/runtime-config.js';
+import { initRuntimeConfig, getAdvanced } from '../core/runtime-config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -42,7 +42,11 @@ let endConversation: () => void = () => {};
 /** 唤醒词配置：从 models/ 读 3 个 ONNX → base64 下发给渲染层。模型缺失则返回 null（功能关闭）。 */
 function buildWakeRuntime(): WakeRuntime | null {
   const dir = join(__dirname, '..', '..', 'models');
-  const threshold = Number(process.env.WAKE_THRESHOLD ?? '0.5');
+  // plan-13: 优先读 userData config 的 wakeThreshold（设置面板滑块），否则 env，否则默认 0.3
+  const cfgThreshold = getAdvanced().wakeThreshold;
+  const threshold = typeof cfgThreshold === 'number'
+    ? cfgThreshold
+    : Number(process.env.WAKE_THRESHOLD ?? '0.3');
   const debug = process.env.WAKE_DEBUG === '1';
   try {
     const b64 = (name: string): string => readFileSync(join(dir, name)).toString('base64');
@@ -106,10 +110,12 @@ app.whenReady().then(() => {
   const wake = buildWakeRuntime();
   const coachIpc = registerCoachIpc(hud, wake);
   endConversation = coachIpc.endConversation;
+  const onWakeHit = coachIpc.onWakeHit;
   createTray(toggle);
   log.info('ipc.registered');
 
-  const logsDir = resolve(process.cwd(), 'logs');
+  // 日志目录用 app.getPath('logs')，打包后也可靠
+  const logsDir = app.getPath('logs');
   const versionCtx = { version: app.getVersion(), electron: process.versions.electron, node: process.versions.node };
   function notifyCrash(message: string): void { hud?.webContents.send(CHANNELS.crashNotice, { message }); }
 
@@ -131,11 +137,14 @@ app.whenReady().then(() => {
     if (++renderGoneCount <= 3) { log.info('crash.renderGone.reload', { attempt: renderGoneCount }); hud?.reload(); }
     else { log.warn('crash.renderGone.giveup', { count: renderGoneCount }); }
   });
+  // 渲染进程成功加载后重置崩溃计数
+  hud.webContents.on('did-finish-load', () => { renderGoneCount = 0; });
 
   // 本地唤醒词命中（渲染层 openWakeWord 检出 "Jarvis"）→ 与热键同样的唤起。
   ipcMain.on(CHANNELS.wake, () => {
     log.info('wake.hit');
     activate();
+    onWakeHit(); // plan-13: 起待判定计时，10s 未说话记 miss
   });
 
   // 渲染层「收起」按钮 → 隐藏窗口 + 结束对话 + 通知渲染层复位。
@@ -153,6 +162,13 @@ app.whenReady().then(() => {
   }
 
   log.info('app.startup.done');
+
+  // 启动即显示侧栏（用户期望打开就能看到，而不是藏在后台等唤醒）
+  if (hud) {
+    showHud(hud);
+    hud.webContents.send(CHANNELS.onActivate);
+    log.info('app.startup.show');
+  }
 
   // macOS：点 dock 图标也唤起
   app.on('activate', () => {

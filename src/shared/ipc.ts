@@ -47,6 +47,12 @@ export const CHANNELS = {
   voiceTtsChunk: 'voice:ttsChunk',
   /** 主 → 渲染：TTS 完成。 */
   voiceTtsDone: 'voice:ttsDone',
+  /** 渲染 → 主：barge-in 打断，通知主进程停止 TTS 合成（plan-13）。 */
+  voiceBargeIn: 'voice:bargeIn',
+  /** 渲染 → 主：获取唤醒词误触发统计（plan-13）。 */
+  wakeStatsGet: 'wake:stats:get',
+  /** 渲染 → 主：重置唤醒词统计（plan-13）。 */
+  wakeStatsReset: 'wake:stats:reset',
   /** 渲染 → 主：本地唤醒词命中，请求唤起面板。 */
   wake: 'wake:trigger',
   /** 主 → 渲染：被热键/托盘/唤醒词唤起，聚焦输入框。 */
@@ -143,7 +149,7 @@ export interface ZuitiConfigDTO {
   credential: { apiKey?: string; baseURL?: string };
   llm: { model?: string }; asr: { model?: string; lang?: 'zh' | 'auto' | 'en' };
   tts: { model?: string; voice?: string }; advanced: { wakeThreshold?: number };
-  ui: { defaultStyle?: string; ttsEnabled?: boolean };
+  ui: { defaultStyle?: string; ttsEnabled?: boolean; sfxEnabled?: boolean; sfxVolume?: number };
 }
 
 /** 诊断聚合统计 DTO（对应 core/diagnostics.ts 的 RunStat）。 */

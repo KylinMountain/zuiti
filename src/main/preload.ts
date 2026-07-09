@@ -5,6 +5,7 @@
  */
 import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS, type Capabilities, type UniversalOutput, type ReplyStyle, type ClassifiedErrorDTO, type HealthResultDTO, type ZuitiConfigDTO, type DiagStatsDTO } from '../shared/ipc.js';
+import type { WakeStats } from '../shared/wake-stats.js';
 
 const api = {
   /** 渲染层日志转发到主进程（写入同一个日志文件）。 */
@@ -73,6 +74,14 @@ const api = {
   onTtsDone: (cb: () => void): void => {
     ipcRenderer.on(CHANNELS.voiceTtsDone, () => cb());
   },
+  /** barge-in 打断：通知主进程停止 TTS 合成（plan-13）。 */
+  bargeIn: (): void => {
+    ipcRenderer.send(CHANNELS.voiceBargeIn);
+  },
+  /** 获取唤醒词误触发统计（plan-13）。 */
+  getWakeStats: (): Promise<WakeStats> => ipcRenderer.invoke(CHANNELS.wakeStatsGet),
+  /** 重置唤醒词统计（plan-13）。 */
+  resetWakeStats: (): Promise<WakeStats> => ipcRenderer.invoke(CHANNELS.wakeStatsReset),
   /** 获取最近 N 条历史（默认 20）。 */
   getHistory: (limit = 20): Promise<unknown[]> => {
     return ipcRenderer.invoke(CHANNELS.historyList, limit);

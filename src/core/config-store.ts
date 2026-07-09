@@ -8,7 +8,7 @@ export interface ZuitiConfig {
   asr: { model?: string; lang?: 'zh' | 'auto' | 'en' };
   tts: { model?: string; voice?: string };
   advanced: { wakeThreshold?: number };
-  ui: { defaultStyle?: string; ttsEnabled?: boolean };
+  ui: { defaultStyle?: string; ttsEnabled?: boolean; sfxEnabled?: boolean; sfxVolume?: number };
 }
 
 const FILENAME = 'zuiti-config.json';

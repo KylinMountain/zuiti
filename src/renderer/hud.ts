@@ -12,6 +12,8 @@ import { buildRenderPlan } from '../shared/render-plan.js';
 import { REPLY_STYLES, DEFAULT_STYLE, type ReplyStyle } from '../shared/ipc.js';
 import type { Capabilities, UniversalOutput, WakeRuntime, ClassifiedErrorDTO, HealthResultDTO, ZuitiConfigDTO, DiagStatsDTO } from '../shared/ipc.js';
 import { nextConvState, type ConvState, type ConvEvent } from '../shared/conv-state.js';
+import { playSfx } from './sfx.js';
+import { renderMarkdown } from './markdown.js';
 
 declare global {
   interface Window {
@@ -33,6 +35,9 @@ declare global {
       onTranscript(cb: (text: string) => void): void;
       onTtsChunk(cb: (base64: string) => void): void;
       onTtsDone(cb: () => void): void;
+      bargeIn(): void;
+      getWakeStats(): Promise<{ hits: number; misses: number; recentMissReasons: string[] }>;
+      resetWakeStats(): Promise<{ hits: number; misses: number; recentMissReasons: string[] }>;
       getConfig(): Promise<ZuitiConfigDTO>;
       setConfig(patch: Partial<ZuitiConfigDTO>): Promise<ZuitiConfigDTO>;
       testConnection(service: 'llm' | 'asr' | 'tts' | 'all'): Promise<HealthResultDTO[]>;
@@ -51,6 +56,25 @@ const api = window.zuiti;
 
 // ============ 风格状态 ============
 let currentStyle: ReplyStyle = DEFAULT_STYLE;
+
+// ============ 音效状态（plan-13） ============
+let sfxEnabled = true;
+let sfxVolume = 0.5;
+let justWoke = false; // wake → listening 时播 listening 音效，bargeIn 后的 listening 不播
+let ttsEnabled = true; // TTS 开关（从配置加载）
+
+/** plan-13: 播音效（如果启用）。 */
+function maybePlaySfx(name: 'wake' | 'listening' | 'ttsDone'): void {
+  if (!sfxEnabled) return;
+  try {
+    const ctx = ensureAudioCtx();
+    void playSfx(ctx, name, sfxVolume).catch((e) => {
+      rlog('error', 'sfx.play.failed', { name, msg: e instanceof Error ? e.message : String(e) });
+    });
+  } catch (e) {
+    rlog('error', 'sfx.ctx.failed', { name, msg: e instanceof Error ? e.message : String(e) });
+  }
+}
 
 function setCurrentStyle(style: ReplyStyle): void {
   currentStyle = style;
@@ -104,13 +128,13 @@ let caps_wake: WakeRuntime | null = null;
 const $text = document.getElementById('text') as HTMLTextAreaElement;
 const $go = document.getElementById('go') as HTMLButtonElement;
 const $mic = document.getElementById('mic') as HTMLButtonElement;
-const $micLabel = $mic.querySelector('.mic-btn__label') as HTMLElement;
 const $voiceState = document.getElementById('voiceState') as HTMLElement;
 const $screenshot = document.getElementById('screenshot') as HTMLInputElement;
 const $avatar = document.getElementById('avatar') as HTMLElement;
 const $moodText = document.getElementById('moodText') as HTMLElement;
 const $wave = document.getElementById('wave') as HTMLElement;
 const $topbar = document.querySelector('.topbar') as HTMLElement | null;
+const $inputWrap = document.querySelector('.input-wrap') as HTMLElement | null;
 
 const avatarFace = $avatar.querySelector('.avatar') as HTMLElement;
 
@@ -131,15 +155,29 @@ function appendUserTurn(text: string): void {
   scrollToBottom();
 }
 
-/** 首轮截图缩略（仅本次对话首轮）。 */
+/** 本轮截图缩略：插到最新用户气泡**前面**（截图在上、文字在下），作为本轮上下文。 */
 function appendScreenshotThumb(dataUrl: string): void {
   hideEmptyState();
+  rlog('info', 'renderer:screenshot.thumb.append', { dataUrlPrefix: dataUrl.slice(0, 30), len: dataUrl.length });
   const el = document.createElement('div');
   el.className = 'shot-thumb';
+  el.dataset.role = 'user-screenshot';
   const img = document.createElement('img');
   img.src = dataUrl; img.alt = '屏幕快照';
+  img.onerror = () => {
+    rlog('error', 'renderer:screenshot.thumb.loadFailed');
+    el.style.borderColor = 'var(--accent-rose)';
+  };
+  img.onload = () => { rlog('info', 'renderer:screenshot.thumb.loaded', { naturalW: img.naturalWidth, naturalH: img.naturalHeight }); };
   el.appendChild(img);
-  $transcript.appendChild(el);
+  // 截图应在用户文字上方：插入到最新用户气泡之前
+  const userBubbles = $transcript.querySelectorAll('.bubble--user');
+  const lastUser = userBubbles.length > 0 ? userBubbles[userBubbles.length - 1] : null;
+  if (lastUser) {
+    $transcript.insertBefore(el, lastUser);
+  } else {
+    $transcript.appendChild(el);
+  }
   scrollToBottom();
 }
 
@@ -147,22 +185,23 @@ function startAssistantTurn(): void {
   hideEmptyState();
   const wrap = document.createElement('div');
   wrap.className = 'bubble bubble--assistant';
-  const p = document.createElement('p');
-  p.className = 'bubble__text';
+  const body = document.createElement('div');
+  body.className = 'bubble__text';
   const cur = document.createElement('span'); cur.className = 'cursor';
-  p.appendChild(cur);
-  wrap.appendChild(p);
+  body.appendChild(cur);
+  wrap.appendChild(body);
   $transcript.appendChild(wrap);
-  $curAssistantText = p;
+  $curAssistantText = body;
   scrollToBottom();
 }
 
 function updateAssistantStream(primarySoFar: string): void {
   if (!$curAssistantText) startAssistantTurn();
-  const p = $curAssistantText!;
-  p.textContent = primarySoFar;
+  const body = $curAssistantText!;
+  // 流式阶段：用 markdown 实时渲染（末尾光标），让用户立即看到粗体/列表等格式。
+  body.innerHTML = renderMarkdown(primarySoFar);
   const c = document.createElement('span'); c.className = 'cursor';
-  p.appendChild(c);
+  body.appendChild(c);
   scrollToBottom();
 }
 
@@ -171,7 +210,8 @@ function finishAssistantTurn(dto: UniversalOutput): void {
   if (!$curAssistantText) startAssistantTurn();
   const wrap = $curAssistantText!.closest('.bubble--assistant') as HTMLElement;
   const plan = buildRenderPlan(dto);
-  $curAssistantText!.textContent = plan.primaryText; // 去光标
+  if (plan.primaryAsLabel) wrap.classList.add('bubble--reply');
+  $curAssistantText!.innerHTML = renderMarkdown(plan.primaryText); // 去光标 + Markdown 渲染
   if (plan.titleVisible) {
     const t = document.createElement('div'); t.className = 'bubble__title'; t.textContent = plan.titleText;
     wrap.insertBefore(t, wrap.firstChild);
@@ -181,13 +221,16 @@ function finishAssistantTurn(dto: UniversalOutput): void {
     for (const it of plan.items) {
       const item = document.createElement('div'); item.className = 'reply-item';
       if (it.label) { const tag = document.createElement('div'); tag.className = 'reply-item__tag'; tag.textContent = it.label; item.appendChild(tag); }
-      const tx = document.createElement('p'); tx.className = 'reply-item__text'; tx.textContent = it.text; item.appendChild(tx);
+      const tx = document.createElement('div'); tx.className = 'reply-item__text'; tx.innerHTML = renderMarkdown(it.text); item.appendChild(tx);
       if (it.copyable) { const b = document.createElement('button'); b.className = 'reply-item__copy'; b.textContent = '复制'; bindCopy(b, it.text); item.appendChild(b); }
       list.appendChild(item);
     }
     wrap.appendChild(list);
   }
-  if (plan.noteVisible) { const n = document.createElement('p'); n.className = 'bubble__note'; n.textContent = plan.noteText; wrap.appendChild(n); }
+  if (plan.noteVisible) {
+    const n = document.createElement('div'); n.className = 'bubble__note'; n.innerHTML = renderMarkdown(plan.noteText);
+    wrap.appendChild(n);
+  }
   $curAssistantText = null;
   scrollToBottom();
 }
@@ -214,6 +257,8 @@ let convState: ConvState = 'idle';
 let noSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 const NO_SPEECH_MS = 10_000;
 let firstTurnPending = true; // 本次对话首轮带截图
+let coachRunning = false; // 防并发：runCoach 期间禁止再次触发
+let ttsAborted = false; // barge-out/barge-in 后拒绝迟到的 TTS chunk
 
 // ============ 上一轮输入缓存（供重试用） ============
 let lastTurn: { text: string; withScreenshot: boolean } | null = null;
@@ -237,6 +282,8 @@ function setHeaderState(s: ConvState): void {
   };
   setMood(moods[s]);
   setAvatarState(s === 'thinking' ? 'thinking' : s === 'speaking' ? 'talking' : s === 'listening' ? 'talking' : 'idle');
+  // wave 绑定到 speaking 状态：idle/listening/thinking 都不显示
+  $wave.hidden = s !== 'speaking';
   if ($topbar) {
     $topbar.classList.remove('topbar--listening', 'topbar--thinking', 'topbar--speaking');
     if (s !== 'idle') $topbar.classList.add(`topbar--${s}`);
@@ -256,16 +303,21 @@ function applyEvent(event: ConvEvent): void {
   switch (next) {
     case 'idle':
       clearNoSpeechTimer();
-      if (recording) stopRecording(false);
+      if (recording) {
+        discardRecording = true; // noSpeechTimeout / reset 等：丢弃录音，不送 ASR，避免孤儿流程
+        stopRecording(false);
+      }
       setHeaderState('idle');
       $voiceState.hidden = true;
       void ensureWakeWord();
       break;
     case 'listening':
       void ensureWakeWordStopped();
+      if (recording) stopRecording(false); // plan-13: 停掉可能的 barge-mode 录音再重开
       void startRecording();
       armNoSpeechTimer();
       setHeaderState('listening');
+      if (justWoke) { maybePlaySfx('listening'); justWoke = false; } // plan-13: 开始录音音效（仅 wake 后）
       break;
     case 'thinking':
       clearNoSpeechTimer();
@@ -274,6 +326,7 @@ function applyEvent(event: ConvEvent): void {
     case 'speaking':
       clearNoSpeechTimer();
       setHeaderState('speaking');
+      void startRecording({ bargeMode: true }); // plan-13: 偷偷开麦做 barge-in 检测
       break;
   }
 }
@@ -281,20 +334,35 @@ function applyEvent(event: ConvEvent): void {
 // ============ TTS 流式播放 ============
 let audioCtx: AudioContext | null = null;
 let ttsStartTime = 0;
+/** plan-13: 活跃 TTS 音频源集合，用于 barge-in 时 stopAllTts() 立即停播。 */
+const activeTtsSources: Set<AudioBufferSourceNode> = new Set();
 
 function ensureAudioCtx(): AudioContext {
   if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 24000 });
   return audioCtx;
 }
 
+/** plan-13: 停掉所有正在播的 TTS 音频源 + 重置排期时间 + 拒绝迟到的 chunk。 */
+function stopAllTts(): void {
+  ttsAborted = true;
+  for (const s of activeTtsSources) {
+    try { s.stop(); } catch { /* already ended */ }
+  }
+  activeTtsSources.clear();
+  ttsStartTime = 0;
+  if (ttsDoneTimer) { clearTimeout(ttsDoneTimer); ttsDoneTimer = null; }
+}
+
 // ============ 发起请求 ============
 function runCoach(): void {
   const text = $text.value.trim();
-  if (!text) return;
+  if (!text || coachRunning) return;
   rlog('info', 'coach.run', { textLen: text.length, withScreenshot: !!$screenshot?.checked });
+  coachRunning = true;
   $go.disabled = true;
   appendUserTurn(text);
   $text.value = '';
+  updateTextareaHeight();
   const withScreenshot = ($screenshot && $screenshot.checked) || firstTurnPending;
   if (withScreenshot) firstTurnPending = false;
   lastTurn = { text, withScreenshot };
@@ -303,10 +371,27 @@ function runCoach(): void {
 
 $go.addEventListener('click', runCoach);
 $text.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+  if (e.key === 'Enter') {
+    if (e.shiftKey) {
+      // Shift+Enter 换行：textarea 默认行为
+      return;
+    }
     e.preventDefault();
     runCoach();
   }
+});
+function updateTextareaHeight(): void {
+  // auto-grow textarea: 1-5 行
+  $text.style.height = 'auto';
+  const maxH = 120;
+  const nextH = Math.min($text.scrollHeight, maxH);
+  $text.style.height = `${nextH}px`;
+}
+
+$text.addEventListener('input', () => {
+  updateTextareaHeight();
+  // 处理期间不重新启用按钮，防止并发
+  if (!coachRunning) $go.disabled = $text.value.trim().length === 0;
 });
 
 // ============ 录音（点一下说话 + VAD 自动停） ============
@@ -318,25 +403,37 @@ let analyser: AnalyserNode | null = null;
 let vad: VadDetector | null = null;
 let vadTimer: ReturnType<typeof setInterval> | null = null;
 let vadPendingStart = false;
+let vadStatBucket = 0; // plan-13 诊断：VAD RMS 日志去重桶
 let discardRecording = false;
+
+/** plan-13: barge-in 检测用更高阈值 + 更长触发时间，抗喇叭回声。 */
+const BARGE_VAD_OPTS = {
+  triggerThreshold: 0.12,
+  silenceThreshold: 0.04,
+  triggerMs: 800,
+  silenceMs: 1200,
+  tickMs: 100,
+};
 
 function setRecordingState(on: boolean): void {
   recording = on;
   if (on) {
     $mic.classList.add('mic-btn--recording');
-    $micLabel.textContent = '喷就完了…';
+    $inputWrap?.classList.add('input-wrap--recording');
     $voiceState.hidden = false;
     $voiceState.textContent = '听你说…说完自动发';
   } else {
     $mic.classList.remove('mic-btn--recording');
-    $micLabel.textContent = '说';
+    $inputWrap?.classList.remove('input-wrap--recording');
     // voiceState hidden is managed by applyEvent('idle') or stays until ASR resolves
   }
 }
 
-async function startRecording(): Promise<void> {
+async function startRecording(opts?: { bargeMode?: boolean }): Promise<void> {
   if (recording) return;
-  rlog('info', 'mic.start');
+  const bargeMode = opts?.bargeMode ?? false;
+  rlog('info', 'mic.start', { bargeMode });
+  if (bargeMode) discardRecording = true; // barge-mode 录音纯做 VAD，不送 ASR
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -349,7 +446,11 @@ async function startRecording(): Promise<void> {
     };
     mediaRecorder.onstop = handleRecordingStop;
 
-    setRecordingState(true);
+    if (bargeMode) {
+      recording = true; // barge-mode 不改 UI（用户不应感知到偷偷开麦）
+    } else {
+      setRecordingState(true);
+    }
 
     // MediaRecorder 一开始就启动，避免 VAD 检测期间丢失开头音频
     mediaRecorder.start();
@@ -361,23 +462,40 @@ async function startRecording(): Promise<void> {
     source.connect(analyser);
     vadPendingStart = false;
     vad = new VadDetector({
-      tickMs: 100,
+      ...(bargeMode ? BARGE_VAD_OPTS : { tickMs: 100 }),
       onStateChange: (state) => {
-        rlog('debug', 'vad.state', { state, vadPendingStart });
-        if (state === 'speaking' && !vadPendingStart) {
-          vadPendingStart = true;
-          applyEvent('speechStart');
-          $voiceState.textContent = '在说…说完自动停';
-        } else if (state === 'silence' && vadPendingStart && recording) {
-          $voiceState.textContent = '识别中…';
-          stopRecording(true);
-          applyEvent('speechEnd');
+        rlog('debug', 'vad.state', { state, vadPendingStart, bargeMode });
+        if (bargeMode) {
+          // plan-13: barge-in 检测——speaking → 打断 TTS 抢麦
+          if (state === 'speaking') {
+            rlog('info', 'bargeIn.detected');
+            stopAllTts();
+            api.bargeIn();
+            stopRecording(false); // 停 barge-mode 录音（discard，不送 ASR）
+            applyEvent('bargeIn'); // speaking → listening → 重新开正常麦
+          }
+        } else {
+          if (state === 'speaking' && !vadPendingStart) {
+            vadPendingStart = true;
+            applyEvent('speechStart');
+            $voiceState.textContent = '在说…说完自动停';
+          } else if (state === 'silence' && vadPendingStart && recording) {
+            $voiceState.textContent = '识别中…';
+            stopRecording(true);
+            applyEvent('speechEnd');
+          }
         }
       },
     });
     vadTimer = setInterval(() => {
       if (!analyser || !vad) return;
-      vad.feed(computeRms(analyser));
+      const rms = computeRms(analyser);
+      // plan-13 诊断：每 ~2s 记一次 RMS，定位 VAD 是否收到声音
+      if (Math.floor(Date.now() / 2000) !== vadStatBucket) {
+        vadStatBucket = Math.floor(Date.now() / 2000);
+        rlog('info', 'vad.rms', { rms: Number(rms.toFixed(4)), thr: 0.05, state: convState, bargeMode });
+      }
+      vad.feed(rms);
     }, 100);
   } catch (err) {
     rlog('error', 'mic.start.failed', { msg: err instanceof Error ? err.message : String(err) });
@@ -428,8 +546,8 @@ async function handleRecordingStop(): Promise<void> {
     const wavBuf = encodeWav(samples, audioBuf.sampleRate);
     const base64 = bytesToBase64(new Uint8Array(wavBuf));
     rlog('info', 'mic.sendAsr', { wavBytes: wavBuf.byteLength, sampleRate: audioBuf.sampleRate });
-    const withScreenshot = firstTurnPending;
-    firstTurnPending = false;
+    const withScreenshot = ($screenshot && $screenshot.checked) || firstTurnPending;
+    if (withScreenshot) firstTurnPending = false;
     lastTurn = { text: '', withScreenshot }; // text will be filled by onTranscript
     api.sendRecordedAudio('data:audio/wav;base64,' + base64, withScreenshot, currentStyle);
   } catch (err) {
@@ -457,35 +575,29 @@ $mic.addEventListener('click', () => {
   }
 });
 
-// ============ 新对话 / 收起 / 再看屏 按钮 ============
+// plan-13: 点头像打断 TTS（barge-out），回 idle 不接话。
+$avatar.addEventListener('click', () => {
+  if (convState === 'speaking') {
+    stopAllTts();
+    api.bargeIn();
+    applyEvent('bargeOut');
+  }
+});
+
+// ============ 新对话 / 收起 按钮 ============
 const $newConvBtn = document.getElementById('newConvBtn') as HTMLButtonElement;
 const $collapseBtn = document.getElementById('collapseBtn') as HTMLButtonElement;
-const $relookBtn = document.getElementById('relookBtn') as HTMLButtonElement;
 
 $newConvBtn?.addEventListener('click', () => {
+  stopAllTts();
   api.resetConversation();
   clearTranscript();
   firstTurnPending = true;
+  coachRunning = false;
+  $go.disabled = $text.value.trim().length === 0;
 });
 
 $collapseBtn?.addEventListener('click', () => { api.hidePanel(); });
-
-$relookBtn?.addEventListener('click', () => {
-  if ($text.value.trim()) {
-    // 直接带截图发一轮：本轮看屏，下一轮不再自动看屏
-    firstTurnPending = false;
-    const t = $text.value.trim();
-    appendUserTurn(t);
-    $go.disabled = true;
-    lastTurn = { text: t, withScreenshot: true };
-    api.runCoach(t, true, currentStyle);
-    $text.value = '';
-  } else {
-    // 没有文字：让下一句语音轮带截图
-    firstTurnPending = true;
-    applyEvent('wake');
-  }
-});
 
 // ============ IPC 监听 ============
 
@@ -498,10 +610,16 @@ api.onTranscript((text) => {
 api.onScreenshot((dataUrl) => { appendScreenshotThumb(dataUrl); });
 
 api.onLoading(() => {
+  ttsAborted = false; // 新轮次开始，重置 TTS 拒绝标志
   if (convState === 'listening') {
     discardRecording = true;
     stopRecording(false);     // 关麦但因 discardRecording 不会送 ASR
     applyEvent('speechEnd');  // listening → thinking
+  } else if (convState === 'speaking') {
+    // TTS 播放中用户新发了一轮：停掉当前 TTS，转 thinking
+    stopAllTts();
+    applyEvent('bargeIn'); // speaking → listening
+    applyEvent('speechEnd'); // listening → thinking
   }
   startAssistantTurn();
 });
@@ -512,26 +630,29 @@ let autoRetriedFor: string | null = null; // 防止无限自动重试（按 user
 
 api.onResult((dto) => {
   finishAssistantTurn(dto);
-  $go.disabled = false;
+  coachRunning = false;
+  $go.disabled = $text.value.trim().length === 0;
   $voiceState.hidden = true;
   autoRetriedFor = null; // 成功一轮，重置自动重试去重
 });
 
 api.onError((err) => {
+  coachRunning = false;
   // 清理 onLoading 建的空 assistant 占位气泡（否则每次报错/每次自动重试都会留一个空气泡）
   if ($curAssistantText && !$curAssistantText.textContent?.trim()) {
     $curAssistantText.closest('.bubble--assistant')?.remove();
     $curAssistantText = null;
   }
   // 瞬时错（network/server）自动重试一次
-  if (err.retryable && lastTurn && autoRetriedFor !== err.userMessage) {
+  if (err.retryable && lastTurn && lastTurn.text && autoRetriedFor !== err.userMessage) {
     autoRetriedFor = err.userMessage;
     rlog('info', 'coach.autoRetry', { kind: err.kind });
+    coachRunning = true;
     setTimeout(() => { if (lastTurn) api.runCoach(lastTurn.text, lastTurn.withScreenshot, currentStyle); }, 800);
     return;
   }
   autoRetriedFor = null;
-  $go.disabled = false;
+  $go.disabled = $text.value.trim().length === 0;
   $voiceState.hidden = true;
   renderErrorBubble(err);
   applyEvent('turnError');
@@ -560,32 +681,45 @@ function renderErrorBubble(err: ClassifiedErrorDTO): void {
 
 // TTS 流式播放
 api.onTtsChunk((base64) => {
-  const ctx = ensureAudioCtx();
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const pcm = new Int16Array(bytes.buffer);
-  const float = new Float32Array(pcm.length);
-  for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 32768;
-  const buf = ctx.createBuffer(1, float.length, 24000);
-  buf.getChannelData(0).set(float);
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  src.connect(ctx.destination);
-  // 严格背靠背排期：从 max(已排到, 现在) 开始，绝不排进过去 → 几段 TTS（首句+剩余/多轮）不会重叠（一起读）。
-  const startAt = Math.max(ttsStartTime, ctx.currentTime);
-  src.start(startAt);
-  ttsStartTime = startAt + buf.duration;
-  if (convState === 'thinking') applyEvent('ttsStart'); // 首个音频块 → speaking
-  $wave.hidden = false;
+  if (ttsAborted || !ttsEnabled) return; // TTS 关闭或 barge-out 后拒绝 chunk
+  try {
+    const ctx = ensureAudioCtx();
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    // 奇数字节数会破坏 Int16Array 对齐：截掉最后一个半样本
+    const aligned = bytes.length % 2 !== 0 ? bytes.subarray(0, bytes.length - 1) : bytes;
+    const pcm = new Int16Array(aligned.buffer);
+    const float = new Float32Array(pcm.length);
+    for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 32768;
+    const buf = ctx.createBuffer(1, float.length, 24000);
+    buf.getChannelData(0).set(float);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    // plan-13: 跟踪活跃源，barge-in 时 stopAllTts() 能立即停。
+    activeTtsSources.add(src);
+    src.onended = () => { activeTtsSources.delete(src); };
+    // 严格背靠背排期：从 max(已排到, 现在) 开始，绝不排进过去 → 几段 TTS（首句+剩余/多轮）不会重叠（一起读）。
+    const startAt = Math.max(ttsStartTime, ctx.currentTime);
+    src.start(startAt);
+    ttsStartTime = startAt + buf.duration;
+    if (convState === 'thinking') applyEvent('ttsStart'); // 首个音频块 → speaking
+  } catch (err) {
+    rlog('error', 'tts.chunk.decode.failed', { msg: err instanceof Error ? err.message : String(err) });
+  }
 });
 
+let ttsDoneTimer: ReturnType<typeof setTimeout> | null = null;
 api.onTtsDone(() => {
   // 本轮 TTS 已全部合成入队；等已排期的音频真正播完再回流（重开麦），否则会在还在说话时开麦（自己听自己）。
   const ctx = audioCtx;
   const waitMs = ctx ? Math.max(0, (ttsStartTime - ctx.currentTime) * 1000) : 0;
-  setTimeout(() => {
+  if (ttsDoneTimer) clearTimeout(ttsDoneTimer);
+  ttsDoneTimer = setTimeout(() => {
+    ttsDoneTimer = null;
     ttsStartTime = 0;
-    $wave.hidden = true;
+    if (ttsAborted) return; // barge-out 后不播结束音效，不触发状态转换
     applyEvent('ttsDone');
+    maybePlaySfx('ttsDone'); // plan-13: TTS 自然播完音效（barge-in 路径不触发 onTtsDone）
   }, waitMs);
 });
 
@@ -608,9 +742,18 @@ async function ensureWakeWordStopped(): Promise<void> {
 }
 function onWakeWordHit(): void {
   rlog('info', 'wakeword.hit');
+  try {
+    maybePlaySfx('wake'); // plan-13: 唤醒命中音效
+  } catch (e) {
+    rlog('error', 'wakeword.sfx.failed', { msg: e instanceof Error ? e.message : String(e) });
+  }
+  justWoke = true;
+  rlog('info', 'wakeword.hit.apiWake');
   api.wake();
+  rlog('info', 'wakeword.hit.applyEvent');
   firstTurnPending = true;
   applyEvent('wake');
+  rlog('info', 'wakeword.hit.done');
 }
 
 // 被唤起 → 聚焦输入 + 进入 listening
@@ -622,6 +765,8 @@ api.onActivate(() => {
 
 api.onDeactivate(() => {
   rlog('info', 'deactivate');
+  stopAllTts();
+  if (ttsDoneTimer) { clearTimeout(ttsDoneTimer); ttsDoneTimer = null; }
   applyEvent('reset');
 });
 
@@ -637,7 +782,6 @@ void api.capabilities().then(async (caps) => {
   } else {
     rlog('warn', 'wakeword.disabled', { reason: 'no wake runtime' });
   }
-  updateConnDot(caps.configured, caps.health);
   if (!caps.configured) showOnboarding();
 });
 
@@ -668,17 +812,6 @@ $text.focus();
 
 // ============ 设置面板 ============
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
-
-// ============ 连接状态点 ============
-function updateConnDot(configured: boolean | undefined, health?: HealthResultDTO[]): void {
-  const dot = $('connDot')!;
-  if (!dot) return;
-  const llm = health?.find((h) => h.service === 'llm');
-  let state: 'ok' | 'warn' | 'unset' = configured ? 'ok' : 'unset';
-  if (llm && !llm.ok) state = llm.kind === 'authInvalid' ? 'unset' : 'warn';
-  dot.className = 'status-dot status-dot--' + state;
-  dot.title = state === 'ok' ? '连接正常' : (llm?.message ?? '未配置');
-}
 
 // ============ 首次向导 ============
 const $onboarding = $('onboarding')!;
@@ -711,7 +844,6 @@ $('obTest')?.addEventListener('click', async () => {
     if (!r) { el.textContent = '❌ 无响应'; return; }
     el.textContent = r.ok ? '✅ 连接正常' : '❌ ' + r.message;
     ($('obDone') as HTMLButtonElement).disabled = !r.ok;
-    updateConnDot(r.ok, [r]);
   } catch {
     el.textContent = '❌ 请求失败';
   }
@@ -720,16 +852,15 @@ $('obTest')?.addEventListener('click', async () => {
 $('obDone')?.addEventListener('click', hideOnboarding);
 $('obSkip')?.addEventListener('click', hideOnboarding);
 
-api.onConnectionStatus((health) => updateConnDot(health.length > 0 && health.every((h) => h.ok), health));
-
 const $settingsBtn = $('settingsBtn') as HTMLButtonElement;
 const $settingsPanel = $('settingsPanel') as HTMLElement;
 const $settingsClose = $('settingsClose') as HTMLButtonElement;
 
-$('connDot')?.addEventListener('click', () => { $settingsPanel.hidden = false; void loadSettingsUI(); void loadDiag(); });
 const $settingDefaultStyle = $('settingDefaultStyle') as HTMLSelectElement;
 const $settingTts = $('settingTts') as HTMLInputElement;
 const $settingWakeThreshold = $('settingWakeThreshold') as HTMLInputElement;
+const $settingSfx = $('settingSfx') as HTMLInputElement;
+const $settingSfxVolume = $('settingSfxVolume') as HTMLInputElement;
 
 $settingsBtn?.addEventListener('click', () => {
   void loadSettingsUI();
@@ -750,13 +881,21 @@ async function loadSettingsUI(): Promise<void> {
     ($('cfgAsrModel') as HTMLInputElement).value = c.asr.model ?? '';
     ($('cfgTtsModel') as HTMLInputElement).value = c.tts.model ?? '';
     ($('cfgTtsVoice') as HTMLInputElement).value = c.tts.voice ?? '';
-    $settingDefaultStyle.value = c.ui.defaultStyle ?? 'empathy';
-    if (!$settingDefaultStyle.value) $settingDefaultStyle.value = 'empathy';
-    setCurrentStyle((c.ui.defaultStyle as ReplyStyle) ?? DEFAULT_STYLE);
+    const rawStyle = c.ui.defaultStyle ?? DEFAULT_STYLE;
+    const validStyle = REPLY_STYLES.some((s) => s.id === rawStyle) ? (rawStyle as ReplyStyle) : DEFAULT_STYLE;
+    $settingDefaultStyle.value = validStyle;
+    setCurrentStyle(validStyle);
     $settingTts.checked = c.ui.ttsEnabled ?? true;
+    ttsEnabled = $settingTts.checked;
+    // plan-13: 音效配置
+    sfxEnabled = c.ui.sfxEnabled ?? true;
+    sfxVolume = typeof c.ui.sfxVolume === 'number' ? c.ui.sfxVolume : 0.5;
+    $settingSfx.checked = sfxEnabled;
+    $settingSfxVolume.value = String(Math.round(sfxVolume * 100));
     if (typeof c.advanced.wakeThreshold === 'number') {
       $settingWakeThreshold.value = String(Math.round(c.advanced.wakeThreshold * 100));
     }
+    void loadWakeStats(); // plan-13: 加载唤醒统计
   } catch (err) {
     rlog('warn', 'settings.load.failed', { msg: err instanceof Error ? err.message : String(err) });
   }
@@ -790,10 +929,37 @@ $settingDefaultStyle?.addEventListener('change', () => {
   void api.setConfig({ ui: { defaultStyle: $settingDefaultStyle.value } });
 });
 $settingTts?.addEventListener('change', () => {
-  void api.setConfig({ ui: { ttsEnabled: $settingTts.checked } });
+  ttsEnabled = $settingTts.checked;
+  void api.setConfig({ ui: { ttsEnabled } });
+});
+// plan-13: 音效开关 / 音量
+$settingSfx?.addEventListener('change', () => {
+  sfxEnabled = $settingSfx.checked;
+  void api.setConfig({ ui: { sfxEnabled } });
+});
+$settingSfxVolume?.addEventListener('input', () => {
+  sfxVolume = Number($settingSfxVolume.value) / 100;
+  void api.setConfig({ ui: { sfxVolume } });
 });
 $settingWakeThreshold?.addEventListener('input', () => {
   void api.setConfig({ advanced: { wakeThreshold: Number($settingWakeThreshold.value) / 100 } });
+});
+
+// plan-13: 唤醒词误触发统计
+async function loadWakeStats(): Promise<void> {
+  try {
+    const s = await api.getWakeStats() as { hits: number; misses: number; recentMissReasons: string[] };
+    const total = s.hits + s.misses;
+    const rate = total === 0 ? 0 : Math.round((s.misses / total) * 100);
+    const el = $('wakeStatsText');
+    if (!el) return;
+    el.textContent = `命中 ${s.hits} / 误触 ${s.misses}（${rate}%）`;
+    el.classList.toggle('settings-item__hint--warn', rate >= 30 && total >= 5);
+  } catch { /* ignore */ }
+}
+$('wakeStatsReset')?.addEventListener('click', async () => {
+  await api.resetWakeStats();
+  void loadWakeStats();
 });
 
 async function loadDiag(): Promise<void> {
@@ -938,9 +1104,12 @@ function copyLastPrimary(): void {
 
 /** 等价于点击「新对话」：结束当前保活会话 + 清空对话流。 */
 function startNewConversationViaShortcut(): void {
+  stopAllTts();
   api.resetConversation();
   clearTranscript();
   firstTurnPending = true;
+  coachRunning = false;
+  $go.disabled = $text.value.trim().length === 0;
 }
 
 /** 循环切到 REPLY_STYLES 里的下一个风格，并持久化到配置。 */
@@ -964,6 +1133,15 @@ document.addEventListener('keydown', (e) => {
   }
   // 其余快捷键在输入框聚焦时不触发。
   if (isTypingInInput()) return;
+
+  // plan-13: Esc 打断 TTS（barge-out），回 idle 不接话。
+  if (e.key === 'Escape' && convState === 'speaking') {
+    e.preventDefault();
+    stopAllTts();
+    api.bargeIn();
+    applyEvent('bargeOut');
+    return;
+  }
 
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;

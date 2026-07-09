@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            dist_cmd: npm run dist:mac
+          - os: windows-latest
+            arch: x64
+            dist_cmd: npm run dist:win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch wake word models
+        run: npm run fetch-models
+        continue-on-error: true
+
+      - name: Build app
+        run: npm run build
+
+      - name: Package
+        run: ${{ matrix.dist_cmd }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*.yml
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+            release/*.exe
+          draft: true
+          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
