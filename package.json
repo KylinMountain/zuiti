@@ -55,6 +55,7 @@
       "skills/**/*",
       "models/**/*",
       "package.json",
+      "!node_modules/onnxruntime-web/**/*",
       "!node_modules/@mistralai/**/*",
       "!node_modules/@google/**/*",
       "!node_modules/@anthropic-ai/**/*",
