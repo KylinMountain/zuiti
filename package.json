@@ -34,8 +34,7 @@
     "@earendil-works/pi-coding-agent": "0.80.2",
     "@picovoice/web-voice-processor": "^4.0.10",
     "dotenv": "^16.4.5",
-    "onnxruntime-web": "^1.27.0",
-    "zod": "^4.0.0"
+    "onnxruntime-web": "^1.27.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -55,7 +54,14 @@
       "dist/**/*",
       "skills/**/*",
       "models/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/@mistralai/**/*",
+      "!node_modules/@google/**/*",
+      "!node_modules/@anthropic-ai/**/*",
+      "!node_modules/@aws-sdk/**/*",
+      "!node_modules/@smithy/**/*",
+      "!node_modules/@aws-crypto/**/*",
+      "!node_modules/@opentelemetry/**/*"
     ],
     "mac": {
       "target": [
