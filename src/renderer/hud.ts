@@ -638,8 +638,10 @@ api.onResult((dto) => {
 
 api.onError((err) => {
   coachRunning = false;
-  // 清理 onLoading 建的空 assistant 占位气泡（否则每次报错/每次自动重试都会留一个空气泡）
-  if ($curAssistantText && !$curAssistantText.textContent?.trim()) {
+  // 清理 onLoading 建的 assistant 占位气泡——不管是空的还是已经蹦了几个字（如 modelStuck
+  // 复读中止：中止前已经把"给你三个回法：给你三个回法："蹦进气泡了），失败轮的内容不可信，
+  // 都不能留在对话流里；重试成功会另起一条新气泡。
+  if ($curAssistantText) {
     $curAssistantText.closest('.bubble--assistant')?.remove();
     $curAssistantText = null;
   }
