@@ -3,8 +3,11 @@ node_modules/
 
 # Build output
 dist/
-build/
 out/
+# electron-builder 复用 build/ 作图标等源资源输入（约定目录名），不是生成产物；
+# 用 build/* 而不是 build/，否则父目录整个被排除后 git 不会再进去看 negation pattern
+build/*
+!build/icon.png
 
 # Electron
 release/

@@ -46,6 +46,7 @@
   "build": {
     "appId": "io.trae.zuiti",
     "productName": "嘴替",
+    "icon": "build/icon.png",
     "artifactName": "zuiti-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
@@ -54,6 +55,7 @@
       "dist/**/*",
       "skills/**/*",
       "models/**/*",
+      "build/icon.png",
       "package.json",
       "!node_modules/onnxruntime-web/**/*",
       "!node_modules/@mistralai/**/*",
