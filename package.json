@@ -47,6 +47,7 @@
   "build": {
     "appId": "io.trae.zuiti",
     "productName": "嘴替",
+    "artifactName": "zuiti-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
