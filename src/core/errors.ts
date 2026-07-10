@@ -1,7 +1,7 @@
 /** 统一错误分类（纯）—— 把 HTTP 状态 / code / 网络异常 归一成用户可见的分类。 */
 export type ErrorKind =
   | 'authInvalid' | 'rateLimited' | 'network' | 'server'
-  | 'asrEmpty' | 'ttsFailed' | 'unknown';
+  | 'asrEmpty' | 'ttsFailed' | 'modelStuck' | 'unknown';
 
 export interface ClassifiedError {
   kind: ErrorKind;
@@ -21,6 +21,7 @@ export function classifyError(input: { httpStatus?: number; code?: string; cause
   const { httpStatus, code, cause } = input;
   if (code === 'asrEmpty') return { kind: 'asrEmpty', userMessage: '没听清，再说一次？', retryable: false };
   if (code === 'ttsFailed') return { kind: 'ttsFailed', userMessage: '语音合成失败（不影响文字回复）', retryable: false };
+  if (code === 'modelStuck') return { kind: 'modelStuck', userMessage: '刚才卡壳重复了，重新试一次', retryable: true };
   if (httpStatus === 401 || httpStatus === 403) {
     return { kind: 'authInvalid', userMessage: 'API Key 无效或无权限，请到设置检查凭证', retryable: false, fixAction: 'openSettings' };
   }

@@ -34,6 +34,12 @@ test('code=asrEmpty → asrEmpty，不重试', () => {
 test('code=ttsFailed → ttsFailed，不重试', () => {
   assert.equal(classifyError({ code: 'ttsFailed' }).kind, 'ttsFailed');
 });
+test('code=modelStuck → modelStuck，可重试', () => {
+  const c = classifyError({ code: 'modelStuck' });
+  assert.equal(c.kind, 'modelStuck');
+  assert.equal(c.retryable, true);
+  assert.ok(c.userMessage.length > 0);
+});
 test('其它 → unknown，不自动重试', () => {
   const c = classifyError({ cause: new Error('weird') });
   assert.equal(c.kind, 'unknown');

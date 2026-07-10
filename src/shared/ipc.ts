@@ -142,7 +142,7 @@ export interface Capabilities {
 }
 
 /** 与 core/errors.ts、core/service-health.ts、core/config-store.ts 对应的跨进程 DTO（结构一致，供渲染层类型使用）。 */
-export type ErrorKind = 'authInvalid' | 'rateLimited' | 'network' | 'server' | 'asrEmpty' | 'ttsFailed' | 'unknown';
+export type ErrorKind = 'authInvalid' | 'rateLimited' | 'network' | 'server' | 'asrEmpty' | 'ttsFailed' | 'modelStuck' | 'unknown';
 export interface ClassifiedErrorDTO { kind: ErrorKind; userMessage: string; retryable: boolean; fixAction?: 'openSettings'; }
 export interface HealthResultDTO { service: 'llm' | 'asr' | 'tts'; ok: boolean; httpStatus?: number; kind?: ErrorKind; message: string; latencyMs: number; }
 export interface ZuitiConfigDTO {

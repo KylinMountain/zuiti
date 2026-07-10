@@ -27,3 +27,18 @@ export const SKIP_REASON = E2E_SKIP
   : HAS_LLM_KEY
     ? ''
     : '无 LLM_API_KEY（.env 未配置）';
+
+/**
+ * 真实 UI 里 retryable 的分类错误（如 modelStuck/network/server）会自动重试一次
+ * （见 hud.ts 的 onError）；e2e 直接调 conversation 层、绕过了那层自愈，
+ * 这里补一次同样的重试，避免模型偶发抽风（跟 debate 路由不稳是同一类非确定性）把测试拖成假阳性失败。
+ */
+export async function retryOnceIfRetryable<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const retryable = !!err && typeof err === 'object' && (err as { retryable?: boolean }).retryable === true;
+    if (!retryable) throw err;
+    return await fn();
+  }
+}

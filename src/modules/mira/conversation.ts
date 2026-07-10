@@ -47,6 +47,23 @@ export function detectSkillId(eventJson: string): string | undefined {
   const m = eventJson.match(/skills\/([a-zA-Z0-9_-]+)\/SKILL\.md/);
   return m?.[1];
 }
+
+/**
+ * 检测文本末尾是否陷入"同一段落连续复读"的退化循环（reply 技能观察到的真实故障：
+ * 模型卡在引导语上反复吐同一句，直到超时也不调 emit_result）。
+ * 只认长度 ≥5 且含 ≥2 个不同字符的重复单元，避免把 "----"/"哈哈哈哈" 这类合法重复误判。
+ */
+export function hasDegenerateRepeat(text: string): boolean {
+  const t = text.trim();
+  for (let unit = 5; unit <= 40 && unit * 2 <= t.length; unit++) {
+    const a = t.slice(t.length - unit * 2, t.length - unit);
+    const b = t.slice(t.length - unit);
+    if (a !== b) continue;
+    if (new Set(a).size <= 1) continue;
+    return true;
+  }
+  return false;
+}
 function dataUrlToImage(dataUrl: string): { type: 'image'; data: string; mimeType: string } {
   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!m) throw new Error('非法 image data URL');
@@ -105,6 +122,7 @@ export class MiraConversation {
     let ttsStarted = false;
     let ttsStartedLen = 0;
     let providerError: unknown = null;
+    let repetitionAborted = false;
 
     const unsub = session.subscribe((e) => {
       const j = safeJson(e);
@@ -130,6 +148,13 @@ export class MiraConversation {
         rawPrimary += ame.delta;
         primary = stripToolInvocation(rawPrimary);
         callbacks?.onReplyChunk?.(primary);
+        // reply 技能实测会卡进复读循环、40s+ 不调 emit_result；检出即中止本轮生成，
+        // 不等它自然结束（正常轮 3-8s，放着不管会挂到 40s 才报错）。
+        if (!repetitionAborted && skillRead === 'reply' && hasDegenerateRepeat(primary)) {
+          repetitionAborted = true;
+          log.warn('conversation.reply.degenerateRepeat', { runId, primaryLen: primary.length, preview: primary.slice(0, 80) });
+          void session.abort();
+        }
         if (!ttsStarted && skillRead !== 'reply') {
           const m = primary.match(FIRST_SENTENCE_END);
           if (m && m.index !== undefined) {
@@ -153,6 +178,12 @@ export class MiraConversation {
         : stylePrefix + text;
       await session.sendUserMessage(content);
     } catch (err) {
+      // abort() 可能让 sendUserMessage 以 reject 收尾——复读中止优先于其它分类。
+      if (repetitionAborted) {
+        log.warn('conversation.reply.aborted', { runId, latencyMs: Date.now() - startTs });
+        this.dispose();
+        throw classifyError({ code: 'modelStuck' });
+      }
       if (providerError) {
         const httpStatus = extractHttpStatus(providerError);
         log.warn('conversation.provider-error', { runId, httpStatus, detail: String(providerError).slice(0, 200) });
@@ -165,6 +196,13 @@ export class MiraConversation {
       throw err;
     } finally {
       unsub();
+    }
+
+    // abort() 也可能让 sendUserMessage 正常 resolve——两条路径都要拦下，不能把复读垃圾当正常输出送出去。
+    if (repetitionAborted) {
+      log.warn('conversation.reply.aborted', { runId, latencyMs: Date.now() - startTs });
+      this.dispose();
+      throw classifyError({ code: 'modelStuck' });
     }
 
     if (providerError) {

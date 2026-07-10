@@ -4,16 +4,16 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SHOULD_RUN_E2E, SKIP_REASON } from './setup.js';
+import { SHOULD_RUN_E2E, SKIP_REASON, retryOnceIfRetryable } from './setup.js';
 import { runSkill } from '../../modules/skill-runner.js';
 
 test('reply：自动选 reply + primary 蹦字 + emit 候选', { skip: SHOULD_RUN_E2E ? false : SKIP_REASON }, async () => {
   let chunks = 0;
-  const { output } = await runSkill('帮我怼回去：他说我代码像屎山', undefined, {
+  const { output } = await retryOnceIfRetryable(() => runSkill('帮我怼回去：他说我代码像屎山', undefined, {
     onReplyChunk: () => {
       chunks++;
     },
-  });
+  }));
   assert.equal(output.skillId, 'reply', 'agent 应 read reply skill');
   assert.ok(output.primary.text.length > 0, 'primary 为空');
   assert.ok(chunks > 1, '没流式蹦字');
