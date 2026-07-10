@@ -104,7 +104,7 @@ export interface WakeRuntime {
 export type ReplyStyle = 'empathy' | 'roast' | 'formal' | 'casual' | 'english';
 
 /** 默认风格。 */
-export const DEFAULT_STYLE: ReplyStyle = 'empathy';
+export const DEFAULT_STYLE: ReplyStyle = 'casual';
 
 /** 所有可用风格（UI 按钮按此顺序渲染）。 */
 export const REPLY_STYLES: ReadonlyArray<{ id: ReplyStyle; label: string; emoji: string }> = [

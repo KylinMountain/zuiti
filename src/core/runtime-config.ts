@@ -8,7 +8,7 @@ const DEFAULTS = {
   ttsModel: 'mimo-v2.5-tts',
   ttsVoice: '冰糖',
   wakeThreshold: 0.3,
-  defaultStyle: 'empathy',
+  defaultStyle: 'casual',
   ttsEnabled: true,
 };
 
